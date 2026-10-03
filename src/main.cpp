@@ -1,3 +1,14 @@
+#ifdef CARDENZA_TARGET
+constexpr bool CPS_USE_PSRAM = false;
+constexpr int CPS_MENU_COLOR_DEPTH = 8; // Save32KB for SD/voice buffers in internal RAM.
+#else
+constexpr bool CPS_USE_PSRAM = true;
+constexpr int CPS_MENU_COLOR_DEPTH = 16;
+#endif
+#ifdef CARDENZA_TARGET
+#include "cardenza/cardenza_hal.h"
+#include "cardenza/cardenza_m5_audio.h"
+#endif
 /*
  * C.P.S. (CardPuter Synth) - v1.0
  * -------------------------------------------------------
@@ -5127,7 +5138,7 @@ void drawSplashBootText(){
 
 void drawSplashLogoAnimation(){
     splashLogo.setColorDepth(16);
-    splashLogo.setPsram(true);
+    splashLogo.setPsram(CPS_USE_PSRAM);
     // 80x80 -> 75x75 (v0.99988) — this time sized against a real number
     // instead of another guess: the previous failure's diagnostic log
     // reported free heap 24,528 with the LARGEST CONTIGUOUS BLOCK only
@@ -8520,6 +8531,13 @@ void midiSerialResume(){
 }
 
 void midiSerialBeginWith(int choice){
+#ifdef CARDENZA_TARGET
+    // GPIO1/2 are the on-board codec bus, never a default Grove UART.
+    if(MIDI_PIN_CANDIDATES[choice][0]<=2 || MIDI_PIN_CANDIDATES[choice][1]<=2) {
+        midiSerialReady=false;
+        return;
+    }
+#endif
     midiSerial.end();
     midiSerial.begin(MIDI_BAUD,SERIAL_8N1,
         MIDI_PIN_CANDIDATES[choice][0],MIDI_PIN_CANDIDATES[choice][1]);
@@ -8532,6 +8550,10 @@ void midiSerialBeginWith(int choice){
 
 void midiSerialBegin(){
     midiSerialBeginWith(0);
+    if(!midiSerialReady) {
+        Serial.println("[MIDI] unavailable: default pins belong to ES8156");
+        return;
+    }
     Serial.println("[MIDI] Unit MIDI checklist: DIP switch = BYPASS,");
     Serial.println("[MIDI]   and the Grove 5V direction switch must be set");
     Serial.println("[MIDI]   to POWER OUT, or the unit gets no power at all.");
@@ -15279,7 +15301,30 @@ void setup(){
     Serial.begin(921600);
     randomSeed(esp_random());
     auto cfg=M5.config();
+#ifdef CARDENZA_TARGET
+    Serial.begin(115200);
+    const bool cardenzaCodecReady = cardenza_hal_init(32, 16);
+    cfg.fallback_board = m5::board_t::board_M5Cardputer;
+    cfg.internal_imu = false;
+#endif
     M5Cardputer.begin(cfg,true);
+#ifdef CARDENZA_TARGET
+    Serial.printf("[Cardenza] ES8156 %s; I2S16/32fs; no gyro/battery/WS2812; heap=%u\n",
+                  cardenzaCodecReady ? "ready" : "FAILED", ESP.getFreeHeap());
+    // Feed both ES8156 output channels. playRaw(false) mono input is duplicated by M5Unified.
+    M5Cardputer.Speaker.end();
+    auto cardenzaSpeaker = M5Cardputer.Speaker.config();
+    cardenzaSpeaker.stereo = true;
+    M5Cardputer.Speaker.config(cardenzaSpeaker);
+    if (!cardenzaCodecReady) {
+        M5Cardputer.Display.fillScreen(TFT_BLACK);
+        M5Cardputer.Display.setTextColor(TFT_RED);
+        M5Cardputer.Display.setCursor(4, 4);
+        M5Cardputer.Display.println("ES8156 INIT FAILED");
+        while (true) delay(100);
+    }
+#endif
+
     isCardputerAdv = (M5.getBoard() == m5::board_t::board_M5CardputerADV);
     refreshSettingItems();
     Serial.printf("[Board] %s\n", isCardputerAdv?"CardputerADV":"Cardputer (original)");
@@ -15364,42 +15409,42 @@ void setup(){
     M5Cardputer.Display.setTextSize(1);
     drawSplashBootText();
 
-    canvas.setColorDepth(16);
+    canvas.setColorDepth(CPS_MENU_COLOR_DEPTH);
     // PSRAM: tried internal SRAM as an experiment (v0.9363) to rule out
     // PSRAM-bus contention as the cause of an audible crackle, but it
     // made no difference — the crackle correlated with redraw FREQUENCY
     // during rapid key input, not where the canvas lives (see the
     // MIN_REDRAW_MS throttle below, added to address the real cause).
     // Back to PSRAM so internal SRAM isn't needlessly spent on this.
-    canvas.setPsram(true);
+    canvas.setPsram(CPS_USE_PSRAM);
     if(!canvas.createSprite(240,135)){
         Serial.println("[Canvas] createSprite FAILED — PLAY/SEQ will show a blank screen until this is fixed");
     }
     canvas.setTextSize(1);
 
     canvasTop.setColorDepth(16);
-    canvasTop.setPsram(true);
+    canvasTop.setPsram(CPS_USE_PSRAM);
     if(!canvasTop.createSprite(240,55)){
         Serial.println("[CanvasTop] createSprite FAILED — PLAY's top region will be blank until this is fixed");
     }
     canvasTop.setTextSize(1);
 
     canvasName.setColorDepth(16);
-    canvasName.setPsram(true);
+    canvasName.setPsram(CPS_USE_PSRAM);
     if(!canvasName.createSprite(74,58)){ // x=0-73, y=55-112
         Serial.println("[CanvasName] createSprite FAILED — PLAY's note-name region will be blank until this is fixed");
     }
     canvasName.setTextSize(1);
 
     canvasImu.setColorDepth(16);
-    canvasImu.setPsram(true);
+    canvasImu.setPsram(CPS_USE_PSRAM);
     if(!canvasImu.createSprite(167,58)){ // x=73-240, y=55-112
         Serial.println("[CanvasImu] createSprite FAILED — PLAY's IMU/bend region will be blank until this is fixed");
     }
     canvasImu.setTextSize(1);
 
     canvasNav.setColorDepth(16);
-    canvasNav.setPsram(true);
+    canvasNav.setPsram(CPS_USE_PSRAM);
     if(!canvasNav.createSprite(240,22)){ // x=0-240, y=113-134
         Serial.println("[CanvasNav] createSprite FAILED — PLAY's nav/scale text will be blank until this is fixed");
     }
@@ -15480,7 +15525,11 @@ void setup(){
     lastModMorph=params.timbreMorph;
     lastModShape=constrain(params.oscShape+params.oscShapeOffset,0.f,1.f);
 
+#ifdef CARDENZA_TARGET
+    bool imuOk=false;
+#else
     bool imuOk=M5.Imu.begin();
+#endif
     Serial.println(imuOk?"[IMU] OK":"[IMU] not found");
 
     auto sc=M5Cardputer.Speaker.config();
@@ -15494,7 +15543,12 @@ void setup(){
     // the latency becomes noticeable.
     sc.dma_buf_len=512;sc.task_pinned_core=APP_CPU_NUM;
     M5Cardputer.Speaker.config(sc);
+
+#ifdef CARDENZA_TARGET
+    cardenza_m5_require(M5Cardputer.Speaker.begin(),"Speaker init FAILED");
+#else
     M5Cardputer.Speaker.begin();
+#endif
     M5Cardputer.Speaker.setVolume(255);
 
     // Audio synthesis runs on Core 0 (PRO_CPU). Core 1 (APP_CPU) is left for
@@ -15502,7 +15556,12 @@ void setup(){
     // (task_pinned_core above). Both cores were previously shared between
     // loop() and this task, which could starve the watchdog under heavy
     // load (e.g. LFO active + rapid retriggering) and freeze the device.
+
+#ifdef CARDENZA_TARGET
+    cardenza_m5_require(xTaskCreatePinnedToCore(audioTask,"audioTask",4096,nullptr,5,nullptr,PRO_CPU_NUM) == pdPASS,"Audio task init FAILED");
+#else
     xTaskCreatePinnedToCore(audioTask,"audioTask",4096,nullptr,5,nullptr,PRO_CPU_NUM);
+#endif
 
     // The one real application of the saved brightness (v0.99986) — see
     // the deferral comment on applyUiBrightness()/bootBrightnessDeferred
