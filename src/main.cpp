@@ -1,9 +1,13 @@
+#include <M5Unified.h>
+#define CPS_USE_PSRAM (!M5.isCardenza())
+#define CPS_MENU_COLOR_DEPTH (M5.isCardenza() ? 8 : 16)
+#include "cardenza/cardenza_m5_audio.h"
 /*
  * C.P.S. (CardPuter Synth) - v1.0
  * -------------------------------------------------------
  * A DIY synthesizer app for the M5Stack Cardputer family.
  * Runs on both CardputerADV (full feature set, incl. IMU) and the
- * original Cardputer (auto-detected at boot — see "Original Cardputer"
+ * original Cardputer (auto-detected at boot â€” see "Original Cardputer"
  * section below for what's different).
  *
  * Features:
@@ -12,11 +16,11 @@
  *     scale with no gaps or overlaps (computed automatically per scale):
  *     "1234567890-=" + Backspace (row 1) and "qwertyuiop[]\" (row 2,
  *     some octaves below row 1). Switch modes in SETTING > Play Mode.
- *   - EZ Mode (default): always the Major scale — simple and
+ *   - EZ Mode (default): always the Major scale â€” simple and
  *     predictable, but with a wide 2-row range so octave-spanning
  *     melodies don't require manually shifting octaves
  *   - Pro Mode: choose any scale, including "Chromatic" (the default,
- *     giving full black-key access — see Scale below)
+ *     giving full black-key access â€” see Scale below)
  *   - Monophonic: last key pressed wins
  *   - Notes can be played on every screen except the Patch Bank (VCO/
  *     VCF/VCA/LFO/SETTINGS/CATEGORY all only use ;/./,// for their own
@@ -40,7 +44,7 @@
  *   - ADSR envelope with retrigger support
  *   - Biquad filter: LPF/HPF/BPF/Notch/None, with its own filter envelope
  *   - Oscillator: Timbre morphs through a user-configurable ORDERED
- *     SUBSET (4-6 slots) of a growing waveform library — currently Sine/
+ *     SUBSET (4-6 slots) of a growing waveform library â€” currently Sine/
  *     Triangle/Sawtooth/Square/Wavefolder/Half-Sine (v0.983 added
  *     Wavefolder, v0.9831 added Half-Sine, both appended to the library
  *     so existing patches/settings keep the same meaning). SETTING >
@@ -48,7 +52,7 @@
  *     list (;/. to move, Enter to add/remove the highlighted waveform,
  *     subject to the 4-6 slot range) plus a graphical strip of the
  *     current chain's order (,// reorders the highlighted entry within
- *     it) — the morph knob's range always matches however many slots
+ *     it) â€” the morph knob's range always matches however many slots
  *     are currently active. Wavefolder drives a sine hard enough to
  *     fold back on itself several times per cycle (rich "West Coast"
  *     texture); Half-Sine is a half-wave-rectified sine (only the
@@ -56,7 +60,7 @@
  *     push a DC bias into the filter/mix downstream.
  *     Shape (v0.985, SETTING menu entry stays "Morph" but the VCO tab's
  *     old "PWM" knob is now called "Shape", 0-100%): each waveform in the
- *     library has a second table representing its Shape=1 extreme —
+ *     library has a second table representing its Shape=1 extreme â€”
  *     Sine gets a touch of 2nd-harmonic bend, Triangle skews toward a
  *     Sawtooth-like ~90/10 rise/fall, Sawtooth becomes a "double saw"
  *     (two ramps per cycle), Square becomes a narrow ~10%-duty pulse
@@ -64,8 +68,8 @@
  *     extreme instead of a separate control), Wavefolder gets a higher
  *     drive (more folds), Half-Sine gets a narrower positive lobe. The
  *     live Shape knob interpolates each waveform between its own Shape=0
- *     and Shape=1 tables — for whichever two waveforms the Timbre morph
- *     is currently blending between — before the morph blend itself
+ *     and Shape=1 tables â€” for whichever two waveforms the Timbre morph
+ *     is currently blending between â€” before the morph blend itself
  *     runs, so Shape and Timbre compose cleanly no matter where either
  *     one is set. This fully replaces the old Square-only PWM special
  *     case with one uniform per-waveform mechanism; the ImuTarget/
@@ -75,54 +79,54 @@
  *     v0.9831 also fixed a real bug: the PLAY screen's waveform preview
  *     (lastModMorph/lastModShape) was only ever updated inside audioTask's
  *     per-sample loop, which is skipped entirely whenever no note is
- *     sounding — so changing Timbre on the VCO tab while idle and
+ *     sounding â€” so changing Timbre on the VCO tab while idle and
  *     returning to PLAY kept showing the OLD waveform until the next
  *     key press refreshed it. Fixed by also updating those two values
  *     from the current base parameters in the idle branch itself.
  *     v0.9841 fixed two more bugs in the same family, found via IMU
  *     testing: (1) timbreMorph's exponential smoothing toward its target
  *     mathematically never exactly arrives, just gets asymptotically
- *     closer — invisible for continuous parameters, but timbreMorph
+ *     closer â€” invisible for continuous parameters, but timbreMorph
  *     feeds a discrete (int) waveform-index lookup for both the audio
  *     blend and the display label, so without an explicit snap the
  *     chain's LAST waveform could never actually be fully reached or
- *     correctly labeled even at full IMU deflection — fixed by snapping
+ *     correctly labeled even at full IMU deflection â€” fixed by snapping
  *     to the target once within 0.01 of it. (2) The idle branch only
  *     updated lastModMorph/lastModShape from timbreMorph, but timbreMorph
  *     ITSELF was still frozen while idle (its own smoothing lives in the
- *     per-sample loop this branch skips) — meaning IMU tilts updating
+ *     per-sample loop this branch skips) â€” meaning IMU tilts updating
  *     the target while no note played never actually moved the real
  *     value at all. Fixed by snapping timbreMorph straight to its target
  *     in the idle branch too (no audible smoothing needed with nothing
  *     sounding anyway).
- *     v0.986 added 2 more waveforms to the library (Parabolic — a
- *     rounded-corner Triangle/arch shape; ESaw — an exponential-curve
+ *     v0.986 added 2 more waveforms to the library (Parabolic â€” a
+ *     rounded-corner Triangle/arch shape; ESaw â€” an exponential-curve
  *     Sawtooth that accelerates through its ramp instead of Sawtooth's
- *     constant linear rate) — MAX_MORPH_SLOTS stays at 6 by design
+ *     constant linear rate) â€” MAX_MORPH_SLOTS stays at 6 by design
  *     (Morph's whole point is picking a capped subset from a growing
  *     library), so these two aren't in anyone's default chain until
  *     manually added via SETTING > Morph. Both are Shape=0 only for now
- *     (their Shape=1 table is the same as Shape=0 — no effect yet — kept
+ *     (their Shape=1 table is the same as Shape=0 â€” no effect yet â€” kept
  *     simple/low-risk this round; dedicated Shape curves for these two
  *     can follow later the same way the original 6 got theirs). Neither
  *     is band-limited via additive synthesis the way Saw/Square/
  *     Wavefolder are, so (like the pre-v0.983 Saw/Square) they may show
- *     some aliasing on extreme high/octave-shifted-up notes — a
+ *     some aliasing on extreme high/octave-shifted-up notes â€” a
  *     conscious simplification for this round rather than an oversight.
  *     Also fixed a real, simple bug from the same v0.984 feature: Half-
  *     Sine's abbreviated name ("HalfSin", 7 chars) overflowed the Morph
- *     screen's 36px-wide chain box — shortened to "HSin" (4 chars,
+ *     screen's 36px-wide chain box â€” shortened to "HSin" (4 chars,
  *     matching the brevity of the other abbreviations). The Morph
  *     screen's library list now scrolls (7 rows visible, centered on
  *     the cursor) now that the library is larger than comfortably fits
- *     in the available space at once — same scrolling pattern already
+ *     in the available space at once â€” same scrolling pattern already
  *     used elsewhere (Pattern Bank, Song), so this won't need revisiting
  *     as the library grows further.
  *     v0.9861 fixed a real bug found on hardware: the LFO screen's
  *     Sawtooth/Square previews had visibly turned wavy/rippled compared
  *     to before v0.983. Root cause: LFO's `lfoTableSample()` was reading
  *     the SAME band-limited (additive-synthesis) Sawtooth/Square tables
- *     the main oscillator uses for anti-aliasing — correct for audio
+ *     the main oscillator uses for anti-aliasing â€” correct for audio
  *     playback, but the Gibbs-phenomenon ripple a truncated harmonic
  *     series produces near a discontinuity has no benefit for an LFO
  *     (0.1-20Hz, nowhere near audio rates) and instead just makes
@@ -133,7 +137,7 @@
  *     v0.9862 added 4 more waveforms (12 total now), all via simple
  *     phase-distortion/waveshaping formulas (a sine warped by a second
  *     sine, or pushed through tanh) rather than harmonic-series
- *     summation — cheap, boot-time-only, and each gives a genuinely
+ *     summation â€” cheap, boot-time-only, and each gives a genuinely
  *     distinct character: Squeeze (sine phase-distorted by itself, an
  *     asymmetric "squeezed" shape), ESquare (sine through tanh, a
  *     smoothly-rounded square-like shape with no hard edges), Saw2 (sine
@@ -141,12 +145,12 @@
  *     ramp distinct from both Sawtooth and ESaw), Square2 (phase-
  *     distortion + tanh combined, a squared-off shape with a different
  *     asymmetry than ESquare). v0.9863 completed Shape support across
- *     the whole 12-waveform library — added proper Shape=1 tables for
+ *     the whole 12-waveform library â€” added proper Shape=1 tables for
  *     the 6 that were still missing one (Parabolic, ESaw, Squeeze,
  *     ESquare, Saw2, Square2), each using the SAME formula family as its
  *     own Shape=0 table with the defining parameter intensified (the
  *     same "turn the same knob further" approach Wavefolder's own
- *     Shape=1 already used) — e.g. ESaw's exponential curve gets
+ *     Shape=1 already used) â€” e.g. ESaw's exponential curve gets
  *     steeper, Squeeze's self-distortion gets stronger, ESquare's tanh
  *     drive gets harder. Shape now works uniformly everywhere in the
  *     library, per the user's explicit request.
@@ -160,7 +164,7 @@
  *     can modulate Pitch / Volume / Timbre / Filter cutoff / Shape.
  *     Fully independent from the existing Vibrato and Tremolo LFOs.
  *     Sample&Hold (v0.982) draws a fresh random value once per LFO cycle
- *     and holds it steady until the next — the draw happens at the one
+ *     and holds it steady until the next â€” the draw happens at the one
  *     authoritative point with true per-sample phase tracking (the
  *     phase-wrap check inside audioTask's per-sample loop), and
  *     `lfoTableSample()` itself just reads the currently-held value with
@@ -168,19 +172,19 @@
  *     and the LFO screen's waveform preview can both sample it freely
  *     without ever disturbing the real audio-rate sequence (an earlier
  *     draft kept this state as a `static` local inside `lfoTableSample()`
- *     itself, which broke exactly that — the screen's own preview sweep
+ *     itself, which broke exactly that â€” the screen's own preview sweep
  *     shared, and fought over, the same state as the live audio).
- *   - FX tab (v0.987, new — 7th tab in the Tab/Shift+Tab cycle: PLAY/SEQ
+ *   - FX tab (v0.987, new â€” 7th tab in the Tab/Shift+Tab cycle: PLAY/SEQ
  *     -> VCO -> VCF -> VCA -> LFO -> FX -> SETTINGS -> PLAY/SEQ, shared
  *     between PLAY and SEQ same as every other tab; tab bar width
  *     shrunk 40px->34px per tab to fit 7 across 240px): first effect is
  *     a Ring Modulator (Ring Rate 20-2000Hz, Ring Mix 0-100%, Mix=0 is
- *     fully off with no separate enabled flag needed) — multiplies the
+ *     fully off with no separate enabled flag needed) â€” multiplies the
  *     post-oscillator/sub/noise signal by an audio-rate carrier (its own
  *     phase accumulator reusing sineTable via lookup, not a fresh sinf()
  *     call, so it stays cheap), placed right before the Bit-crusher
  *     stage. No IMU/LFO targets for it yet (kept this first FX delivery
- *     focused) — can follow later using the same base+offset+offsetTarget
+ *     focused) â€” can follow later using the same base+offset+offsetTarget
  *     pattern already used for every other IMU-mappable parameter, at
  *     which point layering it under IMU control adds no meaningful cost
  *     either (IMU only ever adds an offset to one already-computed
@@ -189,7 +193,7 @@
  *     items on this same tab rather than one tab each.
  *     Also fixed a real bug found while implementing this: LFO wave
  *     load/restore still checked "< 4" from before Sample&Hold (the 5th
- *     LfoWave value, added v0.982) existed — a saved Sample&Hold LFO
+ *     LfoWave value, added v0.982) existed â€” a saved Sample&Hold LFO
  *     selection would silently fail to restore on reboot, quietly
  *     reverting to Sine. Fixed to "< 5".
  *     v0.9871 redesigned the FX tab into two levels, per user's request
@@ -199,46 +203,46 @@
  *     and each pad's own parameter screen (`.` drills in, reusing the
  *     same SettingItem-list pattern as VCO/VCF/VCA/LFO; Tab returns to
  *     the pad selector instead of advancing to the next tab while
- *     inside a param screen — intercepted at the top of the Tab-cycle
+ *     inside a param screen â€” intercepted at the top of the Tab-cycle
  *     handler specifically for this state, everywhere else FX stays a
  *     normal member of the cycle). Toggling a pad off always zeroes
  *     that effect's own mix/amount for an unambiguous "off"; toggling
  *     on restores a reasonable default instead of whatever fractional
- *     value it was left at. Extensible by design — FxEffect/
+ *     value it was left at. Extensible by design â€” FxEffect/
  *     FX_EFFECT_NAMES/fxIsOn()/fxToggle()/fxGetParamItems() are the only
  *     4 places a future effect (soft limiter, Chorus, Delay) needs a new
  *     entry, the pad UI itself doesn't change. Confirmed with the user
  *     up front that running multiple effects simultaneously is fine
- *     cost-wise — each effect's own Mix parameter already gates whether
+ *     cost-wise â€” each effect's own Mix parameter already gates whether
  *     its processing runs at all, so an unused effect costs nothing, and
  *     nothing here forces effects to be mutually exclusive the way some
  *     hardware historically limited "2 effects at a time".
  *     v0.9872 added the 2nd effect, a Soft Limiter (Drive 1.0-5.0x,
- *     Mix 0-100%, same off-when-zero convention) — needed a genuinely
+ *     Mix 0-100%, same off-when-zero convention) â€” needed a genuinely
  *     different implementation approach than everything else in this
  *     file: a limiter has to respond to each sample's INSTANTANEOUS
  *     value, so unlike control-rate parameters it can't be computed
  *     once per buffer, and calling a transcendental function (tanhf)
  *     every single sample would violate the project's own established
  *     "no expensive math in the per-sample loop" rule. Used the classic
- *     x/(1+|x|) rational soft-clip curve instead — smooth, tanh-like
+ *     x/(1+|x|) rational soft-clip curve instead â€” smooth, tanh-like
  *     saturation shape from one fabsf() and one division, cheap enough
  *     to run every sample safely. Applied at the very end of the signal
  *     path, on the fully-mixed sample right before it's written to the
  *     output buffer (after volume/tremolo/envelope, not before).
  *     v0.9873 added the 3rd effect, Chorus (Rate 0.1-5Hz, Depth 0-20ms,
- *     Mix 0-100%, same off-when-zero convention) — a ~2048-sample
+ *     Mix 0-100%, same off-when-zero convention) â€” a ~2048-sample
  *     (~46ms @44100Hz) circular delay buffer, written every sample and
  *     read back from a fractional position that swings around a ~10ms
  *     base delay by the LFO (sineTable lookup, same cheap approach as
  *     Ring Mod's carrier); the two nearest buffer samples are linearly
  *     interpolated since the read position isn't sample-aligned, giving
  *     a smooth result instead of a stair-stepped one. Placed right
- *     after the Filter stage, before volume/tremolo/envelope — timbral
+ *     after the Filter stage, before volume/tremolo/envelope â€” timbral
  *     effects belong earlier in the chain than final loudness shaping.
  *     v0.9874 added the 4th and (per the original plan) final regular
  *     FX pad, Delay/Echo (Time 50-800ms, Feedback 0-90%, Mix 0-100%,
- *     same off-when-zero convention) — a ~35280-sample (800ms @44100Hz)
+ *     same off-when-zero convention) â€” a ~35280-sample (800ms @44100Hz)
  *     circular buffer holding dry+feedback*delayed, so repeat echoes
  *     emerge and decay naturally from that recirculation without
  *     needing to explicitly track multiple echo taps. Unlike Chorus,
@@ -249,8 +253,8 @@
  *     original feasibility discussion).
  *     Also fixed a real gap found by the user: Patch Reset zeroed
  *     timbreMorph (the knob position) but never restored the Morph
- *     CHAIN itself (morphChain[]/morphChainLen — which waveforms are
- *     active and in what order) to its default — so a customized chain,
+ *     CHAIN itself (morphChain[]/morphChainLen â€” which waveforms are
+ *     active and in what order) to its default â€” so a customized chain,
  *     or an unusual waveform a beginner selected by accident, survived
  *     a "reset the tone" action instead of being cleared along with
  *     everything else. performPatchToneReset() now also resets the
@@ -261,33 +265,33 @@
  *     being cut off dead the instant a note ended. Both came from the
  *     same root cause: audioTask's envPhase==IDLE branch skips the
  *     whole per-sample loop, so applyChorus()/applyDelay() stopped
- *     being called while nothing was sounding — the delay line froze
+ *     being called while nothing was sounding â€” the delay line froze
  *     mid-stride with the previous note still sitting in it, and the
  *     next note-on read that stale audio straight out at full level,
  *     a hard step from silence that reads as a broadband click. (Same
  *     class of bug as v0.9831's waveform preview and v0.9841's
  *     timbreMorph: anything that has to stay live while idle needs its
  *     own handling in that branch.) Fixed by giving the idle branch a
- *     proper FX-tail path — it keeps generating and playing buffers,
+ *     proper FX-tail path â€” it keeps generating and playing buffers,
  *     feeding silence through the FX chain, until the tail decays below
  *     an audible threshold, then clears the buffers and drops back to
  *     the cheap sleep. Chorus and Delay also moved from mid-chain to
  *     after the VCA (the conventional VCO->VCF->VCA->FX order), since
  *     sitting before the envelope meant echoes were being gated by it
  *     a second time. NOTE: this genuinely changes how existing patches
- *     sound — echoes now ring out properly instead of being clipped.
+ *     sound â€” echoes now ring out properly instead of being clipped.
  *     Also in v0.9875: Patch Reset now switches all four FX off and
  *     clears their buffers, and resets Bit-crusher (previously left
  *     untouched, so a forgotten Bit-crusher setting survived a "reset
  *     the tone" the same way the Morph chain used to). The default IMU
- *     Y-axis target changed from Volume to Shape — Volume as a default
+ *     Y-axis target changed from Volume to Shape â€” Volume as a default
  *     means simply holding the device at an angle can silence it, which
  *     reads as broken hardware to a first-time user; Shape always keeps
  *     the sound audible. The two places that set IMU defaults had also
  *     drifted apart (first-boot said Vibrato Depth, Patch Reset said
  *     Volume); both now agree on Shape. Finally, the audioTask timing
  *     diagnostic now stops measuring at the end of DSP instead of after
- *     playRaw() — including playRaw() meant the figure converged on the
+ *     playRaw() â€” including playRaw() meant the figure converged on the
  *     buffer period (~23220us) as soon as the speaker queue filled,
  *     reporting playback rate rather than CPU cost and making the
  *     "over budget" counter fire on buffers that were never late.
@@ -297,13 +301,13 @@
  *     Feedback/Mix. They use the same base+offset+offsetTarget pattern as
  *     every other modulatable parameter here, with the offsets smoothed
  *     at buffer rate and resolved by updateFxEffective() once per buffer
- *     into fxEff* values that the apply* functions read — so modulation
+ *     into fxEff* values that the apply* functions read â€” so modulation
  *     adds no per-sample cost at all. Both enums were APPENDED to, never
  *     inserted into, since settings.json stores target selections
  *     numerically. Two parameters were left out on purpose. Delay Time,
  *     because applyDelay() reads its buffer at an integer offset, so
  *     sweeping the time would step the read position a whole sample at a
- *     time (zipper noise) and re-pitch echoes already recirculating —
+ *     time (zipper noise) and re-pitch echoes already recirculating â€”
  *     doing it properly needs interpolated reads like Chorus has, which
  *     changes how the existing Delay sounds and so belongs in its own
  *     change. Chorus Rate, because modulating one LFO's rate with another
@@ -317,7 +321,7 @@
  *     Cause: clearFxBuffers() reset chorusLfoPhase to 0. That phase sets
  *     the chorus read distance, so zeroing it teleported the read
  *     position by up to ~900 samples in one step, and a step in read
- *     position is a step in the output waveform — a click, scaled by Mix,
+ *     position is a step in the output waveform â€” a click, scaled by Mix,
  *     which is exactly how it presented. clearFxBuffers() runs at the end
  *     of every FX tail, so with an arpeggio it fired in the gap between
  *     notes and clicked on every one; Delay then captured those clicks
@@ -332,14 +336,14 @@
  *     constant is well short of a chorus LFO cycle (200ms at the fastest
  *     5Hz setting), so the sweep is unaffected and only steps are
  *     rounded off. This is the same defect class that kept Delay Time off
- *     the modulation list in v0.9876 — it applied to Chorus Depth too,
+ *     the modulation list in v0.9876 â€” it applied to Chorus Depth too,
  *     which was missed at the time.
  *     v0.9878 fixed the click that v0.9877 left exposed: with the loud
  *     per-note crackle gone, a quieter one on key press became audible.
  *     This one was always there, just masked. When the chorus line is
  *     empty and a note starts, the read pointer spends the first
  *     delay-time worth of samples inside the empty region and then
- *     crosses into the freshly recorded note in a single sample — so the
+ *     crosses into the freshly recorded note in a single sample â€” so the
  *     wet signal goes from silence to the note's full attack in one step,
  *     scaled by Mix. It never happened during an arpeggio because the
  *     line never empties between fast notes, and that difference is what
@@ -350,9 +354,9 @@
  *     is inaudible next to the click it replaces. Note this was NOT
  *     caused by clearFxBuffers() zeroing the chorus buffer: three tail
  *     buffers write more zeros than the 2048-sample line holds, so it is
- *     empty by then either way — removing the memset would not have
+ *     empty by then either way â€” removing the memset would not have
  *     helped.
- *     v0.9879 added the 5th FX pad, Reverb — the one effect held back from
+ *     v0.9879 added the 5th FX pad, Reverb â€” the one effect held back from
  *     the original lineup as "hardest to keep light". The measured
  *     headroom made it viable: once the v0.9875 timing fix showed real
  *     DSP cost sitting near 58% of budget rather than the 88% previously
@@ -369,13 +373,13 @@
  *     are float rather than int16: comb feedback runs near 0.84, so buffer
  *     contents recirculate at a steady-state gain around 6x with eight
  *     combs summing on top, which would put int16 quantization noise back
- *     around -65dBFS — audible as hiss exactly where a reverb tail is most
+ *     around -65dBFS â€” audible as hiss exactly where a reverb tail is most
  *     exposed. That costs ~50KB instead of ~25KB. And the buffer wrap is
  *     an if-compare rather than a modulo, because a modulo is an integer
  *     division and there are twelve wraps per sample here. Everything else
  *     follows the established extension points: FxEffect + FX_EFFECT_NAMES
  *     + fxIsOn/fxToggle/fxGetParamItems, with the pad selector itself
- *     needing no changes — though five pads at 44px+4px gap come to
+ *     needing no changes â€” though five pads at 44px+4px gap come to
  *     exactly 240px, so a sixth effect will need that layout revisited.
  *     v0.988 optimized the reverb rather than adding anything. Measured on
  *     hardware it cost ~5800us per buffer, about 25% of the budget and
@@ -391,7 +395,7 @@
  *     compile-time constants instead of loads through a pointer array.
  *     platformio.ini additionally switches from the Arduino core's default
  *     -Os to -O2, which applies to the whole firmware. Neither change
- *     touches the algorithm, so the reverb should sound identical — if it
+ *     touches the algorithm, so the reverb should sound identical â€” if it
  *     does not, that is a bug, not a tuning change. If more is needed the
  *     next lever is block processing: applyReverb() reloads twelve indices
  *     and eight damping states per sample purely because it is called per
@@ -400,7 +404,7 @@
  *     Measured, the two changes pulled in opposite directions: the FX-tail
  *     path (almost pure effects, so the cleanest read on reverb cost)
  *     dropped from ~7700us to ~6390us, meaning the reverb itself went from
- *     ~5500us to ~4190us — the unrolling did roughly what it was meant to.
+ *     ~5500us to ~4190us â€” the unrolling did roughly what it was meant to.
  *     But per-buffer peaks rose from ~22000us to ~23350us and one buffer
  *     went over budget, the first in this project's logs. Peak variance
  *     roughly tripled while the average fell. That pattern points at the
@@ -408,12 +412,12 @@
  *     from flash through a cache, -O2 inlines and unrolls more, the hot
  *     path grows, and a miss costs more than the instructions saved. -Os
  *     is often genuinely faster on a large ESP32 firmware for that reason.
- *     A single 126us overrun was never audible — the speaker queue holds
- *     8x512 samples, about 93ms of cushion — but it means the margin is
+ *     A single 126us overrun was never audible â€” the speaker queue holds
+ *     8x512 samples, about 93ms of cushion â€” but it means the margin is
  *     thin, and thin margin is worth more than a slightly lower average.
  *     v0.989 gave Vibrato, Tremolo and the Bit-crusher menu controls. All
  *     three dated from the earliest IMU work, before an FX tab existed,
- *     and could only ever be reached by tilting the device — which had
+ *     and could only ever be reached by tilting the device â€” which had
  *     become the odd one out now that everything else has a menu. They did
  *     not simply lack a menu: the IMU wrote their value DIRECTLY rather
  *     than adding an offset, so a menu control would have been overwritten
@@ -423,8 +427,8 @@
  *     patch carries a value and nothing changes sound on upgrade).
  *     The two IMU gates are gone with them. Vibrato and Tremolo only
  *     applied when an axis was actually assigned to them, which made sense
- *     when tilt was the only way to set them at all — a leftover depth
- *     would otherwise have been unreachable dead modulation — but with a
+ *     when tilt was the only way to set them at all â€” a leftover depth
+ *     would otherwise have been unreachable dead modulation â€” but with a
  *     menu control it would do the opposite of what a user expects: set
  *     Depth, hear nothing, no way to tell why.
  *     Where each one went is deliberate. The Bit-crusher is a signal
@@ -436,26 +440,26 @@
  *     Vibrato went to VCO and Tremolo to VCA, where a hardware synth puts
  *     them. Also fixed while here: applyBitcrush() called powf() on every
  *     sample, which this file's own rule about the per-sample loop
- *     forbids — the amount can only change once per buffer, so the powf()
+ *     forbids â€” the amount can only change once per buffer, so the powf()
  *     moved to updateFxEffective() and the level count is passed in.
  *     The pad selector went to two rows of three with rounded corners and
  *     labels centred vertically as well as horizontally. Five 44px pads
  *     had filled the 240px width exactly, so the 6th had nowhere to go;
  *     shrinking them would have cut labels to five characters and lost
  *     "RingMod". At 72px across two rows the names stay readable and there
- *     is room for a 7th and 8th. ,// still walks all six in order — the
+ *     is room for a 7th and 8th. ,// still walks all six in order â€” the
  *     grid is visual only, so navigation was untouched. The VCA tab needed
  *     splitting into two columns for the same class of reason: a 5th item
  *     in one column would have landed past the nav line.
  *     v0.9891 made Square's Shape a real pulse-width sweep again. Since
  *     v0.985 folded PWM into Shape it had been a crossfade between a
- *     50%-duty band-limited square and a hard-edged 10% pulse — and a
+ *     50%-duty band-limited square and a hard-edged 10% pulse â€” and a
  *     crossfade cannot produce a duty sweep. Mixing those two gives their
  *     SUM: a stepped three-level waveform, not a square of intermediate
  *     width, which is exactly what showed up on hardware anywhere between
  *     the extremes. Square now rebuilds its table instead, using the
  *     identity that a pulse is the difference of two sawtooths offset in
- *     phase by the pulse width — pulse(x,w) = saw(x) - saw(x-w). Because
+ *     phase by the pulse width â€” pulse(x,w) = saw(x) - saw(x-w). Because
  *     sawtoothTable is already band-limited so is the result, and there is
  *     no per-sample cost at all: 256 table entries rebuilt only when the
  *     value actually changes is cheaper than 1024 extra lookups per buffer
@@ -466,7 +470,7 @@
  *     peak level for every width. Normalization measures the actual peak
  *     rather than deriving it, since a pulse's two levels are asymmetric
  *     and band-limiting adds Gibbs overshoot an analytical figure misses.
- *     Rebuilt from the idle branch as well as the buffer-rate block —
+ *     Rebuilt from the idle branch as well as the buffer-rate block â€”
  *     otherwise the VCO preview would freeze at the last width until a
  *     note was played, the same idle-branch trap as v0.9831 and v0.9841.
  *     One thing this does NOT change: the ripple visible along the flat
@@ -477,17 +481,17 @@
  *     v0.9892 corrected the width mapping. v0.9891 fixed the SHAPE of the
  *     sweep but not its range: it ran 50% duty down to 10%, symmetrical at
  *     Shape 0. Photos of the pre-Shape firmware showed the original PWM
- *     control swept both ways — 10% at one end, symmetrical at the middle,
- *     90% at the other — so half the range had been missing, and the
+ *     control swept both ways â€” 10% at one end, symmetrical at the middle,
+ *     90% at the other â€” so half the range had been missing, and the
  *     default Shape of 0.5 sat on a 30% pulse rather than a plain square.
  *     Now 0 -> 10%, 0.5 -> 50%, 1 -> 90%, linear across the whole knob so
  *     neither end is a dead zone. Verified on the host: 12.1/31.2/49.6/
  *     68.8/87.9% measured duty at Shape 0/25/50/75/100%, identical peak
  *     level throughout.
  *     v0.9893 stopped the FX pads discarding your Mix setting. Switching
- *     an effect off has to zero its Mix — that IS "off" everywhere in this
+ *     an effect off has to zero its Mix â€” that IS "off" everywhere in this
  *     file, and fxIsOn() reads the same value to decide how to draw the
- *     pad — but switching back on restored a fixed default rather than
+ *     pad â€” but switching back on restored a fixed default rather than
  *     what had been there, so setting Delay to 50%, toggling off and on,
  *     and getting 40% back looked like the pad quietly throwing the
  *     setting away. fxToggle() now saves the level before clearing it and
@@ -499,13 +503,13 @@
  *     default, since zero is all that was stored.
  *     v0.9894 fixed two things the hardware turned up. Square's pulse
  *     visibly shrank as the width moved away from 50%, because the table
- *     normalized peak rather than peak-to-peak — a DC-free pulse is
+ *     normalized peak rather than peak-to-peak â€” a DC-free pulse is
  *     asymmetric about zero, so holding the larger side fixed lets the
  *     span collapse. Peak-to-peak is now held instead, sized so the
  *     10%/90% extremes peak at 26000 (ESQUARE_AMP, the loudest waveform
  *     here), which puts the symmetrical square at about +/-14400 instead
- *     of +/-18000. That is roughly 1.9dB quieter — under the ~3dB that
- *     reads as a clear step, and only on this one waveform — and in
+ *     of +/-18000. That is roughly 1.9dB quieter â€” under the ~3dB that
+ *     reads as a clear step, and only on this one waveform â€” and in
  *     exchange the loudness change across a PWM sweep drops from 2.6x to
  *     1.67x in RMS, which is much closer to what a sweep should sound
  *     like. Second, the Bit-crusher needed to be near 90% before anything
@@ -521,7 +525,7 @@
  *     logarithmically, so that is an enormous jump at the 100Hz end and
  *     almost nothing at 8000Hz, and crossing the range took 79 presses on
  *     the parameter people touch most. It now multiplies by 1.15, the
- *     same factor LFO Rate and Ring Mod Rate already used — every press
+ *     same factor LFO Rate and Ring Mod Rate already used â€” every press
  *     moves the same musical interval, low-end resolution goes from 100Hz
  *     steps to 15Hz, and the full sweep is 31 presses.
  *     Held keys now auto-repeat. Every menu action here was edge
@@ -532,19 +536,19 @@
  *     impossible. Deliberately NOT applied to: Enter on an FX pad and the
  *     FX drill-in key (repeating those just flickers an effect or
  *     re-enters a screen), and value editing on the SETTINGS and CATEGORY
- *     screens — several category items are binary toggles bound to both
+ *     screens â€” several category items are binary toggles bound to both
  *     inc and dec, and a toggle repeating 14 times a second lands wherever
  *     you happened to release. List movement repeats everywhere, which is
  *     the part that helps on a long list.
  *     The FX pads became a grid in v0.989 but ,// kept walking all six in
  *     a line, so moving from the top row to the one below took three
  *     presses where the eye says one. ';' now moves a row, wrapping.
- *     Purely additive — ,// still walks the sequence and . still drills
- *     in — and written as "up one row" rather than "swap rows" so it still
+ *     Purely additive â€” ,// still walks the sequence and . still drills
+ *     in â€” and written as "up one row" rather than "swap rows" so it still
  *     makes sense if a 7th effect ever makes it three rows.
  *     v0.9901 fixed a fault in that repeat logic. menuKeyFire() only ever
  *     recorded a hold timestamp on the initial press, and only the branch
- *     for the current screen runs each frame — so a key held across a
+ *     for the current screen runs each frame â€” so a key held across a
  *     screen change arrived carrying a timestamp from minutes earlier, and
  *     the first frame in the new screen saw a key that looked like it had
  *     been held forever and repeated immediately. Pressing '.' on the FX
@@ -557,12 +561,12 @@
  *     note was sounding, while Timbre's moved freely. Shape's IMU offset is
  *     smoothed in the buffer-rate block, which the idle branch skips, so it
  *     froze with nothing playing. It is snapped in that branch now, exactly
- *     as timbreMorph already was — v0.9841 fixed this for timbreMorph and
+ *     as timbreMorph already was â€” v0.9841 fixed this for timbreMorph and
  *     missed the parameter sitting next to it, making this the fourth
  *     appearance of the same idle-branch trap.
  *     Also fixed a genuine overflow in applyBitcrush(): rounding pushes
  *     values near full scale UP past it, so at 4 levels an input of 30000
- *     rounds to 32768 — one above int16's maximum — and the cast wrapped it
+ *     rounds to 32768 â€” one above int16's maximum â€” and the cast wrapped it
  *     to -32768. A loud note hit that on most peaks. Now clamped before the
  *     cast. This is a real defect but NOT an explanation for the effect
  *     being inaudible, which remains unexplained: the quantization maths
@@ -575,7 +579,7 @@
  *     carry a marker: '*' when an IMU axis drives that parameter, '~' when
  *     the LFO does, both when both. SettingItem gained two target fields
  *     to support it, declared WITHOUT in-class default initializers on
- *     purpose — this is a C++11 build, where a default initializer makes
+ *     purpose â€” this is a C++11 build, where a default initializer makes
  *     the struct non-aggregate and would break every existing
  *     {"Name",inc,dec,label} in the file. Without one, aggregate
  *     initialization value-initializes them to NONE, so untagged arrays
@@ -586,7 +590,7 @@
  *     the new one after editing Timbre or Shape in VCO. The preview is
  *     smoothed so that modulation animates instead of stepping frame to
  *     frame, which is right for continuous motion but wrong for a discrete
- *     edit — it showed a waveform the synth was not actually set to. It
+ *     edit â€” it showed a waveform the synth was not actually set to. It
  *     now snaps when arriving back on the screen or when the value jumps
  *     by more than 0.05, a threshold far above what modulation moves
  *     between two frames and far below any menu step, and keeps smoothing
@@ -608,7 +612,7 @@
  *     oscWaveformTable()/oscWaveformTableB() four times per SAMPLE. Both
  *     are switch statements over the waveform enum, so that was four
  *     dispatches plus four pointer loads 44100 times a second to reach
- *     addresses that only change when the Morph chain is edited — the one
+ *     addresses that only change when the Morph chain is edited â€” the one
  *     place this file's own "expensive work at buffer rate" rule had never
  *     been applied. The pointers are now resolved into a flat per-slot
  *     array once per buffer (12 switch calls per 1024 samples instead of
@@ -616,35 +620,35 @@
  *     bit-identical: same tables, same order, only the lookup moved.
  *     Refreshed from the buffer-rate block, from the idle branch (the
  *     Morph chain is edited with nothing sounding, so the preview would
- *     otherwise keep drawing the old chain — the same idle-branch trap
+ *     otherwise keep drawing the old chain â€” the same idle-branch trap
  *     this project keeps meeting) and at boot. Whatever this frees goes
  *     straight into the budget for oscillator two.
- *     Measured afterwards, that optimization made no difference at all —
+ *     Measured afterwards, that optimization made no difference at all â€”
  *     the average was unchanged. The reasoning was sound (four switch
  *     dispatches per sample is real work) but it was not the bottleneck;
  *     the compiler or the instruction cache was evidently already handling
  *     it. The code is bit-identical and harmless so it stays, but it did
  *     not free the headroom it was written to free. What the same run DID
  *     establish is the number that mattered: with all FX off, a sounding
- *     voice costs ~9,700us, 42% of budget — not the ~12,000us/52% that had
+ *     voice costs ~9,700us, 42% of budget â€” not the ~12,000us/52% that had
  *     been estimated. So the room for a second oscillator was already
  *     there.
  *     v0.9911 adds oscillator 2. It has its own position along the Morph
  *     chain, its own Shape, its own Detune/Fine/Octave, and a Mix that
- *     crossfades between the two — at 0 you hear only oscillator 1, so
+ *     crossfades between the two â€” at 0 you hear only oscillator 1, so
  *     every existing patch sounds exactly as it did and nothing needs
  *     migrating. It shares the Morph chain, filter, envelope and VCA,
  *     because those are one signal path; duplicating them would make it a
  *     second voice rather than a second oscillator. Skipped entirely at
  *     Mix 0, so an unused oscillator costs nothing, and its pitch ratio
  *     resolves once per buffer since it needs a powf().
- *     The UI is a second page inside the VCO tab rather than a new tab —
+ *     The UI is a second page inside the VCO tab rather than a new tab â€”
  *     the tab bar is already seven entries at 34px and an eighth would not
  *     fit. An "Osc" row at the top of each page flips between them with
  *     ',' and '/', so the switch is where you are already looking. That row
  *     is bound to both inc and dec, which means it must NOT auto-repeat, or
  *     it would flip pages ~14 times a second and land wherever you released
- *     — the same hazard as the CATEGORY screen's toggles, detected here by
+ *     â€” the same hazard as the CATEGORY screen's toggles, detected here by
  *     testing whether a row's two handlers are the same function. Mix
  *     appears on both pages deliberately: it is what you reach for while
  *     balancing the two, and having to change page to hear the balance move
@@ -653,7 +657,7 @@
  *     v0.9912 fixed the VCO page-1 left column running into the nav line.
  *     Adding the page-flip row and a Mix row took that page to 11 items, so
  *     6 rows at the old fixed 13px pitch put the last at y=122 and its
- *     glyphs at 130 — through the nav text at 126. drawItemList()'s row
+ *     glyphs at 130 â€” through the nav text at 126. drawItemList()'s row
  *     pitch is a parameter now, and that page alone uses 12px from y=56,
  *     which lands the lowest row at 116 and ends it at 124. Every other
  *     screen keeps 13.
@@ -661,7 +665,7 @@
  *     Writing settings.json was ~100 separate f.printf() calls straight to
  *     the File, each reaching the FAT layer and the SPI driver on its own.
  *     On the buffer where a save landed, audioTask's worst case went from
- *     the usual ~22-23ms to 31ms — well past the 23.22ms budget — and the
+ *     the usual ~22-23ms to 31ms â€” well past the 23.22ms budget â€” and the
  *     surrounding second logged several late buffers. The text is now
  *     assembled in a RAM buffer and written once, so the card is touched a
  *     single time instead of a hundred. The pattern save got the same
@@ -671,12 +675,12 @@
  *     directly, but they only happen on an explicit user action.
  *     v0.9914 gave oscillator 2 the whole waveform library. It had been
  *     picking a position along the Morph chain, which meant it could only
- *     reach waveforms that happened to be in that chain — and the chain
+ *     reach waveforms that happened to be in that chain â€” and the chain
  *     exists purely so IMU and LFO can sweep continuously between
  *     waveforms, which a fixed layer never needs. So the restriction was
  *     costing reach and buying nothing: with osc 1 morphing the six
  *     defaults you could not put an ESquare underneath it. It now selects
- *     one of all twelve outright. Simpler as well — one table pair read
+ *     one of all twelve outright. Simpler as well â€” one table pair read
  *     directly, no morph interpolation, resolved at buffer rate like
  *     everything else. LFO->Shape still reaches it, LFO->Timbre no longer
  *     does: there is no Timbre to sweep, but Shape still gives the layer
@@ -685,7 +689,7 @@
  *     v0.9915 moved the reverb and the soft limiter to whole-buffer
  *     passes. Called per sample, applyReverb() reloaded twelve buffer
  *     indices and eight damping states from memory, used each once, and
- *     wrote them all back — 1024 times per buffer. None of that is the
+ *     wrote them all back â€” 1024 times per buffer. None of that is the
  *     reverb; it is the cost of the call boundary. The state is now
  *     hoisted into locals for the length of the buffer, so the load/store
  *     happens once instead of 1024 times, with the arithmetic, the
@@ -699,7 +703,7 @@
  *     when the tail ends.
  *     Worth recording why the obvious alternative does not work: lowering
  *     the reverb's Room, Damping or Mix does not reduce its cost at all.
- *     Those are coefficients, not amounts of work — all eight combs and
+ *     Those are coefficients, not amounts of work â€” all eight combs and
  *     four allpasses run every sample regardless. Mix=0 is the sole
  *     exception, since that returns early. The reverb is all-or-nothing,
  *     which is why this had to be attacked as bookkeeping.
@@ -717,7 +721,7 @@
  *     comparing against the pre-Shape firmware had no way to tell from the
  *     screen that it was the same control.
  *     Single-parameter effects are edited in place on the pad selector
- *     instead of opening a screen for one number — the Bit-crusher's
+ *     instead of opening a screen for one number â€” the Bit-crusher's
  *     Amount is its only control. '.' toggles inline editing on such a
  *     pad, ',' and '/' then change the value instead of moving the pad
  *     cursor, and '.', Enter or ';' leaves. The value shows on the info
@@ -734,7 +738,7 @@
  *     Each IMU axis can be switched off with Shift+A / Shift+S, the same
  *     shape as Shift+V for the arpeggiator; unshifted stays the hold
  *     toggle. Disabling an axis also clears its offset and releases its
- *     hold — otherwise whatever it was contributing would freeze at the
+ *     hold â€” otherwise whatever it was contributing would freeze at the
  *     tilt you happened to be at, leaving the sound altered by a control
  *     that reads as off. The enable flag is separate from target==NONE so
  *     that switching an axis off and back on keeps its assignment, and it
@@ -745,17 +749,17 @@
  *     area ("ARP", or "ARP L" with latch on). It was previously only in
  *     the help overlay, so you had to press a key to find out. The flag is
  *     part of the dirty test, so toggling it redraws at once instead of
- *     waiting for the waveform to move — with a static patch that could
+ *     waiting for the waveform to move â€” with a static patch that could
  *     have been a long wait.
  *     v0.9922 fixes two faults in the previous version.
  *     Shift+A/S/H did nothing. The keyboard reports the SHIFTED character,
- *     so a shifted A arrives as 'A' rather than as 'a' with s.shift set —
+ *     so a shifted A arrives as 'A' rather than as 'a' with s.shift set â€”
  *     testing s.shift alone could never fire. Shift+V already carried a
  *     note about precisely this along with a defensive uppercase test, and
  *     that lesson was not carried across. Both forms are accepted now.
  *     The second was the display corruption after using the help overlay:
  *     nav line blanked, help text left in the waveform area, and SEQ's
- *     orange bleeding into PLAY after switching modes — all intermittent.
+ *     orange bleeding into PLAY after switching modes â€” all intermittent.
  *     The overlay covers the whole screen while PLAY and SEQ redraw
  *     through several partial sprites, so closing it must be followed by a
  *     FULL redraw or leftover pixels survive wherever no dirty region
@@ -763,7 +767,7 @@
  *     consumed in the same frame: if that frame was throttled
  *     (canForceRedraw false, MIN_REDRAW_MS not elapsed) it was dropped,
  *     and lastHelpVisible had already been updated, so the next frame no
- *     longer knew a full redraw was owed — the 100ms fallback then redrew
+ *     longer knew a full redraw was owed â€” the 100ms fallback then redrew
  *     only the dirty regions. Whether it corrupted depended on where in
  *     the throttle window the key release landed, which is exactly why it
  *     came and went at random. The request is latched now and cleared only
@@ -775,7 +779,7 @@
  *     v0.9923: the Y axis still read "0%" when switched off while X read
  *     "-- OFF --". The v0.9921 edit was written against the X readout's
  *     variable name, and the Y readout uses a different one, so it matched
- *     X's two sites and silently missed Y's two — the sort of thing a
+ *     X's two sites and silently missed Y's two â€” the sort of thing a
  *     find-and-replace does quietly. Both axes agree now.
  *     v0.9924 is four pieces of tidying, all user-spotted.
  *     Pro Style's scale readout said "Chromatic: Chromatic", since
@@ -784,7 +788,7 @@
  *     The SETTING list showed "Select>" on every row. The word was
  *     identical everywhere, so it carried no information, and because the
  *     row name prints in a fixed-width field it sat in a different column
- *     for "Portamento" and "Play Style" than for the shorter names — a
+ *     for "Portamento" and "Play Style" than for the shorter names â€” a
  *     ragged edge earned for nothing. Just the arrow now, which still says
  *     "this opens something" and lines up.
  *     "Play Mode" became "Play Style", and EZ/Pro became EZ Style/Pro
@@ -792,8 +796,8 @@
  *     firmware; PLAY / SEQ / SONG arrived later and took the word, leaving
  *     two unrelated things both called Mode. All four menu variants and
  *     the category title were updated together.
- *     The sequencer's step outlines are coloured in groups of four —
- *     red, orange, yellow, cream — the way the TR-808 tinted its sixteen
+ *     The sequencer's step outlines are coloured in groups of four â€”
+ *     red, orange, yellow, cream â€” the way the TR-808 tinted its sixteen
  *     step buttons so you could see which beat of the bar you were on.
  *     (The 909 dropped it; it deserved better.) Outline only: the fill
  *     still carries velocity and accent, and cursor and playhead still
@@ -804,7 +808,7 @@
  *     from, so the two were close in both hue and brightness and the
  *     border sank into the bar. Two changes, neither of which costs any
  *     information. The bar is drawn in a darkened orange (and a darkened
- *     red when accented) used for nothing else — bar HEIGHT still carries
+ *     red when accented) used for nothing else â€” bar HEIGHT still carries
  *     velocity and the accent is still a distinct hue, so both read as
  *     before, while the beat colour now sits clearly on top. And the fill
  *     is inset by the outline thickness, leaving a black gap so the two
@@ -815,8 +819,8 @@
  *     globally would have made every readout and border on the screen
  *     harder to read in order to fix it.
  *     v0.9926 re-picked those colours and fixed a real performance fault.
- *     Darkening the orange had taken it straight through brown — 120,66,0
- *     IS a dark brown — so on the panel the steps read as muddy rather
+ *     Darkening the orange had taken it straight through brown â€” 120,66,0
+ *     IS a dark brown â€” so on the panel the steps read as muddy rather
  *     than dim. Pulling the hue toward amber and keeping saturation high
  *     gives the same drop in brightness against the outlines while still
  *     looking like a colour; the accent bar moves to deep pink for the
@@ -827,24 +831,24 @@
  *     The Pattern bank grid crawled under the cursor keys, and opening it
  *     during playback dragged the sequencer's tempo down. Cause:
  *     drawPatternBankScreen() called patternSlotExists() for all 64 cells,
- *     so every redraw meant 64 SD.exists() calls — 64 card transactions,
+ *     so every redraw meant 64 SD.exists() calls â€” 64 card transactions,
  *     several times a second, blocking long enough to interfere with the
  *     audio task. Same mechanism as the settings-save spike fixed in
  *     v0.9913, in a place nobody thought to look because nothing appeared
  *     to be writing. Occupancy is cached now, read once on entering the
- *     screen and refreshed after a save or delete — the only things that
+ *     screen and refreshed after a save or delete â€” the only things that
  *     can change it. The Enter and Delete handlers were hitting the card
  *     on every press for the same answer and now use the cache too.
  *     v0.9927 gave up on a coloured fill for the sequencer steps. Every
  *     version of a dimmed ORANGE stayed in the same hue family as the beat
- *     outlines — beat 1 and beat 2 especially — so the border kept sinking
+ *     outlines â€” beat 1 and beat 2 especially â€” so the border kept sinking
  *     into the bar no matter how the brightness was tuned. A neutral has
  *     no hue to collide with: near-white separates from all four beat
  *     colours equally, and it is the brightest thing available, which
  *     suits the element that should read first.
  *     That forced the other two fills to move, since white was already
- *     spoken for. Accent is violet — the one direction no beat colour
- *     occupies, since they run red -> orange -> lime -> cyan — so it can
+ *     spoken for. Accent is violet â€” the one direction no beat colour
+ *     occupies, since they run red -> orange -> lime -> cyan â€” so it can
  *     never be mistaken for an outline. The playhead is green, and remains
  *     the most conspicuous thing on the screen because it is the only part
  *     that moves. Beat 4's cyan was deepened, since a pale cyan was the
@@ -852,31 +856,31 @@
  *     it. The cursor outline stays white and still reads, because the fill
  *     is inset by the outline thickness and there is always a black gap
  *     between the two.
- *     v0.9928 takes the beat colours to a palette the user supplied —
+ *     v0.9928 takes the beat colours to a palette the user supplied â€”
  *     primary red, orange, green, blue. Four clearly separated hues suit a
  *     small backlit panel better than the 808's warm gradient did: the
  *     yellow previously on beat 3 was too close to the near-white fill to
  *     read across it, which was the last remaining collision.
  *     Two deliberate departures from the palette as given. Its blue,
  *     1005EB, is very dark, and a dark outline on a black background is
- *     close to invisible here — the hue is kept and the luminance raised
+ *     close to invisible here â€” the hue is kept and the luminance raised
  *     until it reads. And with a green and a blue now among the beats,
  *     every candidate for the playhead sat next to one of them, so the
- *     fill drops from near-white to mid grey — still neutral, still
- *     colliding with no beat hue — which frees white to be the playhead
+ *     fill drops from near-white to mid grey â€” still neutral, still
+ *     colliding with no beat hue â€” which frees white to be the playhead
  *     again, as it was before v0.9927. Accent moves to magenta, the
  *     direction none of the four occupies.
  *     v0.9929 replaced that magenta with teal on preference. The choice is
  *     more constrained than it appears: the beat outlines sit at roughly
  *     0 deg (red), 30 (orange), 110 (green) and 235 (blue), leaving only
- *     two hue gaps wide enough to be unambiguous — around 175 (cyan/teal)
+ *     two hue gaps wide enough to be unambiguous â€” around 175 (cyan/teal)
  *     and around 300 (purple/magenta). Teal is the better of the two
  *     because it is ~60 deg from both neighbours, where purple is only
  *     ~50 from blue and would be a fill sitting inside a blue outline.
  *     Kept fully saturated rather than lightened so it reads as a strong
  *     colour rather than a pastel.
  *     v0.993 swaps the ordinary fill back to white and moves the playhead
- *     to purple, on preference — the white bars look better on the panel.
+ *     to purple, on preference â€” the white bars look better on the panel.
  *     Worth recording what this trades away, since it may want reverting.
  *     Brightness is the strongest signal available, and white bars moving
  *     through grey ones made the playhead unmissable. Marking it by hue
@@ -885,14 +889,14 @@
  *     beat outlines leave exactly two usable gaps in the hue circle and
  *     teal has the other. The cursor outline stays white and still reads
  *     over a white fill thanks to the inset gap from v0.9927.
- *     Swapping the two outright — a grey playhead over white fill — was
+ *     Swapping the two outright â€” a grey playhead over white fill â€” was
  *     considered and rejected: it would have made the two things that most
  *     need to stand out, the playhead and the cursor, the two dimmest
  *     things on the screen.
  *     v0.9931 covers three requests.
  *     Randomize Patch had quietly stopped covering the synth. Everything
- *     added since it was written — oscillator 2, Vibrato, Tremolo, the
- *     Bit-crusher and all five FX — was simply never touched by it, so a
+ *     added since it was written â€” oscillator 2, Vibrato, Tremolo, the
+ *     Bit-crusher and all five FX â€” was simply never touched by it, so a
  *     "random patch" was random only in the parts that existed in 2024.
  *     Audited in one pass and all of it included. The probabilities are
  *     not uniform on purpose: oscillator 2 appears about a third of the
@@ -901,7 +905,7 @@
  *     semitone offset), Vibrato and Tremolo are occasional and shallow,
  *     the Bit-crusher is rarer still and capped well below its top, and
  *     each FX pad is rolled independently so they cannot all land at once
- *     — which would both bury the patch and put every random patch at the
+ *     â€” which would both bury the patch and put every random patch at the
  *     top of the CPU budget. The existing Noise line was left exactly as
  *     it was, having already been tuned deliberately.
  *     Oscillator 2 gained a Semitone control, -12..+12, which is what it
@@ -913,7 +917,7 @@
  *     The IMU target picker is two levels now, like the scale picker: 28
  *     targets in one flat list meant scrolling four screens to reach the
  *     far end. It also opens with VCO at the top rather than pitch and
- *     volume — Timbre and Shape move the waveform on screen as you tilt,
+ *     volume â€” Timbre and Shape move the waveform on screen as you tilt,
  *     which is what this synth is for; pitch was first only because it was
  *     what existed when the list was written. The NONE entry is gone,
  *     since Shift+A / Shift+S switch an axis off outright and that says it
@@ -923,38 +927,38 @@
  *     keep in step instead of two.
  *     v0.9932 fixed patch loading, which had been quietly merging rather
  *     than replacing. The settings parser only ever ASSIGNS keys it finds
- *     and leaves anything absent alone — correct for settings.json, which
+ *     and leaves anything absent alone â€” correct for settings.json, which
  *     this firmware always writes complete, but wrong for a patch file
  *     saved by an older version. A patch from before oscillator 2, the
  *     Morph chain or the FX tab existed has no keys for any of them, so
  *     loading it gave you that patch's tone with whatever oscillator 2,
  *     Morph chain and effects happened to be set at the time. Not a
- *     consequence of changing the format, as it might look — the parser
+ *     consequence of changing the format, as it might look â€” the parser
  *     simply never had a notion of "absent means default". Patch loads now
  *     reset the tone to defaults first, so an absent key means default
  *     rather than keep, and old patches load sounding as they did when
  *     they were saved. settings.json keeps the old behaviour, since it is
  *     always current and complete.
  *     v0.9933 sets the default Morph chain back to the four waveforms the
- *     synth shipped with — Sine, Triangle, Sawtooth, Square. It had grown
+ *     synth shipped with â€” Sine, Triangle, Sawtooth, Square. It had grown
  *     to six, picking up Wavefolder and Half-Sine as they were added, but
  *     the default is what a beginner meets and what a tone reset returns
  *     to, and that should be the plain starting point; the other eight are
  *     there to be chosen. MIN_MORPH_SLOTS is 4, so this is the smallest
  *     valid chain. Safe to change because the twelve-waveform library has
- *     not shipped publicly yet — patches saved against a six-slot default
+ *     not shipped publicly yet â€” patches saved against a six-slot default
  *     only exist on the developer's own device.
  *     Note the reset path also has to refresh the cached morph table
  *     pointers: they still describe the previous chain, and the audio task
  *     would otherwise read the old slots until the next buffer-rate
  *     refresh happened to catch up.
  *     v0.9934 covers three more IMU items.
- *     The picker's sections follow the TAB BAR now — VCO, VCF, VCA, LFO,
+ *     The picker's sections follow the TAB BAR now â€” VCO, VCF, VCA, LFO,
  *     FX, then Pitch and ARP/SEQ, which have no tab of their own. FX had
  *     been near the top because its effects are the easiest to hear, but
  *     since the list was split into sections there is no long scroll left
  *     to save anyone from, so matching the tabs is worth more than
- *     ordering by impact — one order to learn instead of two.
+ *     ordering by impact â€” one order to learn instead of two.
  *     Osc Mix joined the VCO section, and it is bipolar on purpose:
  *     tilting one way brings oscillator 1 forward and the other brings
  *     oscillator 2, so at full deflection you get one or the other alone.
@@ -964,7 +968,7 @@
  *     asymmetry was hard to justify.
  *     Finally, a disabled axis now shows an empty level track. It had been
  *     showing a half-full bar for some targets and an empty one for
- *     others, which was never a decision — getImuNorm() returns each
+ *     others, which was never a decision â€” getImuNorm() returns each
  *     target's current value and where zero sits differs per target
  *     (Shape's neutral is mid-range, the Bit-crusher's is the bottom), so
  *     the bar simply reflected whatever the maths gave. Off now looks the
@@ -972,7 +976,7 @@
  *     v0.9935 fixes both of the previous version's new controls.
  *     Osc Mix only ever moved toward oscillator 1, whichever way the
  *     device was tilted. It inherited the axis's own bipolar setting, and
- *     with that off the caller takes fabsf() of the tilt — so both
+ *     with that off the caller takes fabsf() of the tilt â€” so both
  *     directions produced the same positive value. Direction IS the
  *     control for a crossfade, so it is forced bipolar now, alongside
  *     Pitch Bend and the ARP targets.
@@ -981,16 +985,16 @@
  *     Square's Shape is a duty sweep baked into its table rather than a
  *     crossfade between two tables, and there was only one such table,
  *     rebuilt from oscillator 1's Shape. Oscillator 2 therefore ignored
- *     its own Shape and displayed oscillator 1's duty — which is exactly
+ *     its own Shape and displayed oscillator 1's duty â€” which is exactly
  *     what looked like it responding. Oscillator 2 has its own table now,
  *     built by a shared routine so the maths cannot drift apart, used by
  *     both the audio path and the VCO 2 preview.
- *     v0.9936 adds UI themes — a feature planned since early on, when this
+ *     v0.9936 adds UI themes â€” a feature planned since early on, when this
  *     was a single-mode synth and one colour was the whole of it.
  *     A theme sets the accent for all THREE home modes at once rather than
  *     one colour, and they are presets rather than free RGB. Both follow
  *     from the same thing: uiColor is not purely decorative. PLAY, SEQ and
- *     SONG are told apart by it, and that is load-bearing — it is how the
+ *     SONG are told apart by it, and that is load-bearing â€” it is how the
  *     v0.9922 "SEQ orange left behind in PLAY" bug was noticed. Three
  *     independent colour pickers would let someone choose three similar
  *     colours and quietly lose the distinction, and a picker on a 240x135
@@ -1005,8 +1009,8 @@
  *     does not read at all. Mono is brightness-only for the same reason,
  *     and doubles as the one that survives direct sunlight.
  *     What a theme does NOT touch: the sequencer's step colours, the level
- *     bars, cursor white. Those carry meaning — beat position, accent,
- *     playhead — rather than decoration, and took six versions to balance.
+ *     bars, cursor white. Those carry meaning â€” beat position, accent,
+ *     playhead â€” rather than decoration, and took six versions to balance.
  *     Changing theme forces a full redraw, since uiColor is read all over
  *     and the partial-redraw paths would otherwise bring the new accent in
  *     piecemeal.
@@ -1014,7 +1018,7 @@
  *     brightness control, and gave the theme its own picker.
  *     As a cycling value in a list that had grown long, Theme was hard to
  *     tell apart from the rows that open a screen. It is a list now, with
- *     each theme's three mode accents drawn as swatches beside its name —
+ *     each theme's three mode accents drawn as swatches beside its name â€”
  *     so the colours can be compared before being applied. That also fixes
  *     Ice and Access looking alike: cycling only ever let you compare a
  *     theme against the one before it, and side by side they are plainly
@@ -1022,7 +1026,7 @@
  *     findable once the cursor moves off it, and the swatches are outlined
  *     in grey rather than uiColor so a white or pale swatch cannot merge
  *     into a pale accent border.
- *     Ember's red went from vermilion to crimson — dropping green to near
+ *     Ember's red went from vermilion to crimson â€” dropping green to near
  *     zero is what makes a red read as deep rather than orange-ish. Ice
  *     moved teal-ward to put more distance between it and Access's blue.
  *     Brightness stops at 32/255 rather than 0: the display is the only
@@ -1031,7 +1035,7 @@
  *     unable to see well enough to undo.
  *     v0.9938 fixes two things from that version.
  *     The build broke on the new SettingsCategory enumerator. It was
- *     called DISPLAY, and M5Unified defines Display as a macro — so it was
+ *     called DISPLAY, and M5Unified defines Display as a macro â€” so it was
  *     substituted before the compiler saw the enum, which then failed to
  *     parse. The error is reported on the enum line itself, which makes it
  *     look like an ordinary syntax mistake rather than a name collision.
@@ -1040,7 +1044,7 @@
  *     collide with platform headers.)
  *     Changing theme also left the tab bar on the old accent. The tab bar
  *     is only painted on a FULL redraw, and the settings and category
- *     screens compute their own full-redraw condition — the uiThemeDirty
+ *     screens compute their own full-redraw condition â€” the uiThemeDirty
  *     latch was only being consulted by the PLAY/SEQ path. Both screens
  *     now include it, and whichever repaints first clears it.
  *     v0.9939 fixes the ordering that broke the build. The theme picker's
@@ -1051,7 +1055,7 @@
  *     definition order IS declaration order, so both had to move up: the
  *     picker state now sits with the theme it belongs to, and the theme
  *     setters plus displayMenuItems sit immediately above
- *     getCategoryItems. This is the same trap the file has hit before —
+ *     getCategoryItems. This is the same trap the file has hit before â€”
  *     new code lands where it reads best rather than where the compiler
  *     needs it.
  *     v0.994 gives the SETTING list two columns and drops the Portamento
@@ -1060,35 +1064,35 @@
  *     reason; VCO and VCA already use two. The split is at 6 rather than
  *     down the middle, because the name field is 8 characters and
  *     "Portamento" and "Play Style" are the only entries that fill or
- *     exceed it — the right column starts at x=123 and must fit name plus
+ *     exceed it â€” the right column starts at x=123 and must fit name plus
  *     value inside 117px, so the long names stay left where they have room
  *     to overrun. Arp and Display, both short, go right.
  *     Portamento's ON/OFF row is gone: it toggles from a performance key
  *     already, exactly as the IMU axes do, and a menu row duplicating a
  *     shortcut is one more thing to scroll past. Speed and Reset stay,
  *     since neither has a key. While removing it, the key handler turned
- *     out to be repeating portaToggle()'s body rather than calling it —
+ *     out to be repeating portaToggle()'s body rather than calling it â€”
  *     with the menu row gone it is the only caller, so it calls the helper
  *     now. Two copies of the same two lines is how they drift apart.
- *     v0.9941 adds Analog Drift — the deliberate instability of an old
+ *     v0.9941 adds Analog Drift â€” the deliberate instability of an old
  *     analog synth. Pitch wanders a few cents, the filter breathes, the
  *     level creeps, all independently: if they moved together it would
  *     read as one tremolo rather than as circuitry. It needed no new
  *     machinery, because base values and effective values are already
- *     separate throughout this file — drift is just one more offset, and
+ *     separate throughout this file â€” drift is just one more offset, and
  *     it resolves once per buffer, so the per-sample cost is zero.
  *     The menus keep showing the base value. That was the request and it
  *     is also what a real synth does: the knob does not move, the sound
  *     does.
  *     Ranges are not uniform. Pitch is held to about nine cents at full
- *     amount — past that it stops sounding like an old synth and starts
+ *     amount â€” past that it stops sounding like an old synth and starts
  *     sounding out of tune. Cutoff takes far more before it reads as
  *     wrong, and level the least, amplitude wobble being the most
  *     obviously artificial of the three. Switching it off eases back to
  *     neutral rather than snapping, so it cannot click mid-note.
  *     It lives on the Pro Style page with Scale, since deliberately losing
  *     stability is the opposite of what EZ Style is for, and a warning
- *     appears below the list while it is on — "Drift ON" alone does not
+ *     appears below the list while it is on â€” "Drift ON" alone does not
  *     tell you the tuning is about to wander, and this is exactly the
  *     setting someone enables, forgets, and later reports as a tuning bug.
  *     The warning shows only when it is on; a permanent caution line would
@@ -1098,7 +1102,7 @@
  *     reached 0.86 of full scale at its peak but only 0.29 RMS, so the
  *     typical detune was under 3 cents while the audible moments were rare
  *     enough to look like nothing was happening. The cause was the pair of
- *     walk constants — a new target was picked (3% per buffer) long before
+ *     walk constants â€” a new target was picked (3% per buffer) long before
  *     the previous one had been travelled to (0.010 per buffer), so the
  *     value spent its life crawling around the middle. Targets are chosen
  *     less often and travelled toward faster now, which lifts RMS to 0.43,
@@ -1108,8 +1112,8 @@
  *     as OSC_MIX in v0.9935: with the axis's own bipolar setting off the
  *     caller takes fabsf() of the tilt, so both directions produced the
  *     same positive offset. Shape's neutral is the MIDDLE of its range
- *     rather than an end — on Square, 0.5 is the symmetrical square and
- *     the two directions widen or narrow the pulse — so it is forced
+ *     rather than an end â€” on Square, 0.5 is the symmetrical square and
+ *     the two directions widen or narrow the pulse â€” so it is forced
  *     bipolar now, along with oscillator 2's Shape. Harder to spot than
  *     the OSC_MIX case because the sound still changed; it just never went
  *     the other way. The readout also showed the raw offset, a signed
@@ -1121,12 +1125,12 @@
  *     relative to the VCO's Shape setting, exactly as every other IMU
  *     target is relative to its own base. With Shape parked at 0% there is
  *     no room below it, so only one direction does anything and the
- *     readout sits at 0 at rest — which looks like the control is broken
+ *     readout sits at 0 at rest â€” which looks like the control is broken
  *     but is the base value showing through. Shape at 50% is what makes
  *     both directions live.
  *     v0.995 adds patch morphing. Ten slots, reached with Shift+1..0,
  *     crossfade the current sound into a stored patch rather than
- *     switching to it — the point being to change sound WHILE playing,
+ *     switching to it â€” the point being to change sound WHILE playing,
  *     with an arpeggio latched or a pattern running, so the change is part
  *     of the performance instead of a pause in it.
  *     Slots are assigned on their own screen under SETTING > Patch >
@@ -1136,12 +1140,12 @@
  *     something implied by the bank's contents. Empty slots are allowed
  *     and do nothing when pressed.
  *     Each slot holds a full snapshot, built once at boot and again when
- *     an assignment changes. Nothing reads the card while morphing —
+ *     an assignment changes. Nothing reads the card while morphing â€”
  *     reads block exactly as writes do, and that has interfered with the
  *     audio twice already here (v0.9913, v0.9926).
- *     Two things are deliberately not interpolated. Discrete state —
+ *     Two things are deliberately not interpolated. Discrete state â€”
  *     waveforms, the Morph chain, filter type, octave and semitone
- *     offsets — switches once at the START, since there is no halfway
+ *     offsets â€” switches once at the START, since there is no halfway
  *     between a saw and a square and a chain changing slot by slot
  *     mid-morph would sound like a fault. And morphFrom is captured from
  *     the LIVE sound at the start of every morph rather than being the
@@ -1152,7 +1156,7 @@
  *     Morph time is on the same screen, 0 to 10s; 0 switches instantly.
  *     The morph advances from loop(), which runs far faster than the ear
  *     needs and leaves audioTask untouched.
- *     Shift+1..0 arrives as '!' through ')' — the keyboard reports the
+ *     Shift+1..0 arrives as '!' through ')' â€” the keyboard reports the
  *     SHIFTED character, the same lesson as Shift+A arriving as 'A' in
  *     v0.9922. Both that and digit-with-shift are accepted. Plain digits
  *     remain note keys, and the trigger is ignored while a text field is
@@ -1163,8 +1167,8 @@
  *     where the compiler needed it.
  *     morphSlotPatch[] and the rest of the slot-screen state were placed
  *     ABOVE the NUM_MORPH_SLOTS constant that sizes the array, so nothing
- *     using them — including saveSettingsToFile() and parseSettingLine(),
- *     far below — could see the declaration. Moved to just after
+ *     using them â€” including saveSettingsToFile() and parseSettingLine(),
+ *     far below â€” could see the declaration. Moved to just after
  *     NUM_MORPH_SLOTS.
  *     updateMorphSlotScreen() called menuKeyFire() and reused the menu's
  *     shared hold-timer globals, but both live with the rest of the picker
@@ -1174,30 +1178,30 @@
  *     The Shift+1..0 block had been spliced into the middle of the
  *     Shift+H if/else chain, which left a dangling else with no if. It is
  *     now its own standalone statement after that chain ends, which is
- *     what it always should have been — it does not participate in that
+ *     what it always should have been â€” it does not participate in that
  *     chain's logic at all.
  *     v0.9952 fixes patches disappearing from Load/Save after boot. The
  *     boot sequence had gained an unnecessary scanPatches() call ahead of
- *     morphLoadAllSlots() — added reflexively, without checking that
+ *     morphLoadAllSlots() â€” added reflexively, without checking that
  *     morphLoadAllSlots() needs it. It does not: it reads each slot's
  *     saved patch NAME and checks SD.exists() on the file directly, never
  *     touching patchNames[]. That extra scan opened the Patch folder once
- *     at boot and closed it, then the Load/Save screen opened it again —
+ *     at boot and closed it, then the Load/Save screen opened it again â€”
  *     and the ESP32 SD library does not always reset a directory handle's
  *     internal state cleanly on a second open of the same path, so the
  *     second scan came back empty. Removed. Nothing else in this codebase
  *     opened that folder twice per session, which is why the fault was
  *     new here rather than pre-existing.
  *     v0.9953 chases the same fault further: after v0.9952 the card was
- *     not mounting AT ALL, so nothing loaded — theme, patches, every
- *     setting back to default — and saves failed with "File system is not
+ *     not mounting AT ALL, so nothing loaded â€” theme, patches, every
+ *     setting back to default â€” and saves failed with "File system is not
  *     mounted".
  *     Two changes, and the diagnostics to tell which mattered. The morph
  *     snapshots moved from internal DRAM to PSRAM. Internal DRAM here is
  *     already very heavily committed (the reverb network is ~50KB of
  *     float, the delay line ~70KB) and SD.begin() allocates its buffers
  *     from what is left, so several KB of new static array does not merely
- *     use memory — it can push the mount over the edge. PSRAM is where
+ *     use memory â€” it can push the mount over the edge. PSRAM is where
  *     this data belonged anyway: it is touched when a slot is assigned or
  *     a morph starts, never per sample, so the slower access costs
  *     nothing. If the allocation fails, morphing disables itself rather
@@ -1213,7 +1217,7 @@
  *     Recorded from that diagnostic run, because it changes what the fix
  *     WAS: this hardware reports "PSRAM chip not found" at boot and
  *     psramInit() fails, despite BOARD_HAS_PSRAM being set. So the move of
- *     the morph snapshots to PSRAM did nothing — the fallback to ordinary
+ *     the morph snapshots to PSRAM did nothing â€” the fallback to ordinary
  *     calloc is what runs, which is no better than the static array it
  *     replaced. What actually fixed the mount was the retry with the
  *     stepped-down clock. Worth knowing before anything else here is ever
@@ -1223,25 +1227,25 @@
  *     patches comes from patchNames[], which is only filled on entering
  *     the Load/Save browser, so the morph screen had to be visited AFTER
  *     Load at least once. It scans on entry now, the same as that browser
- *     does. This is not the boot-time scan removed in v0.9952 — that one
+ *     does. This is not the boot-time scan removed in v0.9952 â€” that one
  *     ran before any other open of the folder and left the handle in a
  *     state the next scan came back empty from; scanning when a screen is
  *     entered is the pattern that has always worked here.
  *     And morphing did not carry the IMU mapping. A patch stores which
  *     parameter each axis drives, so a morph that leaves that behind
  *     changes the sound while tilt keeps doing whatever the previous patch
- *     said — the opposite of loading that patch. The mapping is discrete,
+ *     said â€” the opposite of loading that patch. The mapping is discrete,
  *     so it switches at the start with the waveforms, and the outgoing
  *     target's offset is cleared first exactly as the IMU picker does, or
  *     whatever it was contributing stays frozen into the sound.
- *     v0.9955 fixes settings coming back wrong after every reboot — Play
- *     Style stuck on Pro/Hirajoshi, Drift stuck ON at 100% — and patches
+ *     v0.9955 fixes settings coming back wrong after every reboot â€” Play
+ *     Style stuck on Pro/Hirajoshi, Drift stuck ON at 100% â€” and patches
  *     changing the output volume.
  *     Both come from morphLoadSlot(). To snapshot a slot it loads that
  *     patch over the live state and then puts the live state back, but it
  *     was only restoring params, the filter and the ADSR. A patch file
  *     also carries Play Style, Scale, Drift, key volume, the IMU mapping,
- *     the LFO, and the arp and portamento settings — all of which were
+ *     the LFO, and the arp and portamento settings â€” all of which were
  *     left holding whatever the LAST slot's patch said. The next settings
  *     save then wrote that to settings.json, making a morph slot's patch
  *     permanently the synth's startup state. Backed up and restored in
@@ -1264,7 +1268,7 @@
  *     v0.9954 cleared an axis's offset only when the morph CHANGED that
  *     axis's target. If the target stayed the same but the incoming patch
  *     had the axis disabled, whatever offset it had been contributing was
- *     frozen with nothing left to update it — and with the axis on Volume
+ *     frozen with nothing left to update it â€” and with the axis on Volume
  *     and the device tilted, that freezes the output at zero until a
  *     reboot. Both axes are now cleared unconditionally before repointing,
  *     any hold is released, and an axis arriving disabled is cleared again
@@ -1274,7 +1278,7 @@
  *     v0.9957 removes the PSRAM flags from platformio.ini and the code
  *     written around them. There is no PSRAM on this hardware and never
  *     was: both boards use an ESP32-S3FN8 (StampS3 / StampS3A), where
- *     "FN8" means 8MB flash and no psram — a part with it reads R8.
+ *     "FN8" means 8MB flash and no psram â€” a part with it reads R8.
  *     -DBOARD_HAS_PSRAM made the SDK hunt for a chip that is not fitted
  *     and fail at boot with "PSRAM chip not found", which reads like a
  *     hardware fault and is not one; the owner of this device reasonably
@@ -1291,21 +1295,21 @@
  *     The numbers that DO matter, measured: free heap ~59KB before
  *     SD.begin() and ~31KB after, so mounting the card costs about 27KB on
  *     its own. That ~31KB is the real ceiling on any future feature
- *     wanting a large buffer — MIDI stacks especially — and running out
+ *     wanting a large buffer â€” MIDI stacks especially â€” and running out
  *     presents as the card silently failing to mount, which in turn looks
  *     like every setting having reset to default.
  *     v0.996 begins MIDI, and begins it away from the risky part. This
  *     version adds only the MESSAGE layer: bytes in, note events out. It
  *     is deliberately not attached to any transport, because USB MIDI
- *     needs a build-time change to the USB mode — and with it the serial
- *     log this project debugs by — so getting the message handling right
+ *     needs a build-time change to the USB mode â€” and with it the serial
+ *     log this project debugs by â€” so getting the message handling right
  *     first keeps that change small and keeps this code useful whichever
  *     transport ends up carrying it, USB or the DIN sockets on a MIDI
  *     unit. Nothing in this version alters existing behaviour: the parser
  *     simply has no source feeding it yet.
  *     What is handled: Note On, Note Off, and Pitch Bend, with running
  *     status, which real keyboards rely on. Velocity 0 is treated as Note
- *     Off — the convention nearly every keyboard uses, and forgetting it
+ *     Off â€” the convention nearly every keyboard uses, and forgetting it
  *     leaves notes stuck on forever. Notes go on a small stack rather than
  *     a single slot, so releasing one key while another is still held
  *     falls back to that note instead of cutting off; overlapping notes
@@ -1313,7 +1317,7 @@
  *     the built-in keys already behave. Velocity lands on
  *     seqVelocityMult, the same scaling the sequencer's per-step velocity
  *     uses, and pitch bend maps onto the existing bend range, so a wheel
- *     and the local bend keys reach the same place — both reuse controls
+ *     and the local bend keys reach the same place â€” both reuse controls
  *     that already exist rather than adding parallel ones.
  *     Omni for now: every channel is accepted. A channel setting can come
  *     later; Omni is what makes "plug it in and it plays" true, which is
@@ -1323,7 +1327,7 @@
  *     no runtime switch: mode 1 is the hardware USB Serial/JTAG that
  *     carries the log and flashing, mode 0 is TinyUSB. Mode 0 is used now,
  *     which lets CDC and MIDI be presented together as one composite
- *     device — so the serial log survives instead of being traded away for
+ *     device â€” so the serial log survives instead of being traded away for
  *     MIDI, which matters given how much of this project has been debugged
  *     from it.
  *     CPS_USB_MIDI in platformio.ini is the single switch that undoes all
@@ -1331,7 +1335,7 @@
  *     firmware builds exactly as v0.996 did. TinyUSB on ESP32-S3 under
  *     PlatformIO is known to be fussy, and the message layer is
  *     transport-independent, so a failure here costs the transport and
- *     nothing else — a MIDI unit's DIN socket feeds the same parser.
+ *     nothing else â€” a MIDI unit's DIN socket feeds the same parser.
  *     usbMidi.begin() runs before Serial.begin(), since the two interfaces
  *     enumerate together and MIDI has to exist before the host is told
  *     what this board is. It names itself "C.P.S." rather than appearing
@@ -1344,7 +1348,7 @@
  *     holding to flash. That is TinyUSB behaving normally, not a fault.
  *     v0.9962 corrects that platformio.ini, which would not resolve: the
  *     TinyUSB library was asked for as ^2.4.3, a version that does not
- *     exist. Pinned to 3.3.4 exactly, and deliberately without a caret —
+ *     exist. Pinned to 3.3.4 exactly, and deliberately without a caret â€”
  *     versions above it are reported to fail to link on ESP32-S3 under
  *     PlatformIO, and a range would quietly pull one in on some later
  *     dependency update.
@@ -1355,16 +1359,16 @@
  *     itself gates on. And lib_archive = no, so TinyUSB's objects are
  *     linked directly instead of from an archive, where the USB
  *     descriptors get dropped as apparently-unreferenced.
- *     v0.9963 turns USB MIDI back off. It enumerated — the host saw a
+ *     v0.9963 turns USB MIDI back off. It enumerated â€” the host saw a
  *     TinyUSB device rather than the usual USB Serial/JTAG one, so the
- *     descriptors and the composite device were right — but the board
+ *     descriptors and the composite device were right â€” but the board
  *     would not stay up.
  *     The measurement explains it. Free heap before SD.begin fell from
  *     ~59KB to ~40KB, so the TinyUSB stack costs about 19KB of internal
  *     DRAM. SD.begin needs roughly 27KB. What was left was not enough:
  *     the card stopped mounting, and the board went into a reset loop on
  *     top of that. This is exactly the ceiling flagged before the attempt
- *     started, now with a number attached — there is not enough internal
+ *     started, now with a number attached â€” there is not enough internal
  *     DRAM for the USB stack and the SD card together as things stand.
  *     Nothing is lost from the code: the MIDI message layer is
  *     transport-independent and is still compiled in, waiting for a
@@ -1377,7 +1381,7 @@
  *     feature that already works, which is why neither was made
  *     unilaterally.
  *     v0.9964 fixes Delay often producing no audible echo at all when it
- *     was the only effect on — and working once Reverb was switched on
+ *     was the only effect on â€” and working once Reverb was switched on
  *     alongside it, which is the detail that gave it away.
  *     The FX tail ends when two consecutive buffers come back quiet. But
  *     immediately after a note stops, the delay line's READ position is
@@ -1391,7 +1395,7 @@
  *     given the chance to appear. The 8-second cap still bounds it.
  *     v0.9965 trades delay length for USB MIDI, deliberately and
  *     reversibly. The maximum delay time goes from 800ms to 400ms, which
- *     shrinks its buffer from ~70KB to ~35KB of internal DRAM — comfortably
+ *     shrinks its buffer from ~70KB to ~35KB of internal DRAM â€” comfortably
  *     more than the ~19KB the TinyUSB stack needs, which is what left too
  *     little for SD.begin's ~27KB and put the board in a reset loop in
  *     v0.9962. USB MIDI is switched back on.
@@ -1406,7 +1410,7 @@
  *     back to 800ms and the TinyUSB build flags are off again.
  *     The delay cut DID solve what it was aimed at: with ~35KB freed the
  *     card mounted, every patch loaded, the IMU came up and audio started
- *     — all of which had failed in v0.9962. So the memory ceiling was read
+ *     â€” all of which had failed in v0.9962. So the memory ceiling was read
  *     correctly and the arithmetic was right. But the board still reset in
  *     a loop, now from somewhere AFTER audio was running, which makes it a
  *     second and unrelated fault rather than the same one. TinyUSB
@@ -1414,13 +1418,13 @@
  *     suspect and would be its own investigation.
  *     Stopping here is the owner's call, made in advance: try it once with
  *     the delay shortened, and if it does not work, drop USB MIDI rather
- *     than keep paying for it. Nothing is wasted — the MIDI message layer
+ *     than keep paying for it. Nothing is wasted â€” the MIDI message layer
  *     stays compiled in and transport-independent, so a MIDI unit's DIN
  *     socket feeds the same parser with no USB stack, no RAM cost, and
  *     none of this.
  *     v0.997 prepares patches to be shared between people, after a user
  *     asked about posting them for others to drop into /CPS/Patch. That
- *     already works mechanically — scanPatches() lists whatever .json it
+ *     already works mechanically â€” scanPatches() lists whatever .json it
  *     finds, and since v0.9932 a missing key means default, so old files
  *     load safely. The problem is what a patch CONTAINS.
  *     Save writes the whole synth state to settings.json and to patch
@@ -1434,7 +1438,7 @@
  *     the SOUND; anything describing the session, the device or a
  *     separate document stays out. Patterns already have their own bank.
  *     Patch files also gained a cps_format stamp, because until now a file
- *     said nothing about what wrote it — worth fixing BEFORE files start
+ *     said nothing about what wrote it â€” worth fixing BEFORE files start
  *     circulating, since a format added later cannot appear in patches
  *     already shared. A reader finding a higher number logs that it is
  *     ignoring settings it does not understand, rather than refusing to
@@ -1444,12 +1448,12 @@
  *     meaning of the keys does.
  *     MAX_PATCHES went from 32 to 64. Collecting other people's files
  *     passes 32 easily, and over the limit scanPatches() silently stopped
- *     adding — the extras just did not appear, with nothing to say why.
+ *     adding â€” the extras just did not appear, with nothing to say why.
  *     v0.9971 stops WRITING into patches what v0.997 stopped reading from
  *     them. Ignoring a key on load but still saving it left morph-slot
  *     assignments, the UI theme, brightness, the sequencer's sixteen steps
  *     and the session's volume and playing style sitting inside every
- *     patch file — about 2KB of a file people are about to share, and an
+ *     patch file â€” about 2KB of a file people are about to share, and an
  *     obvious question for anyone who opens one: why are someone else's
  *     morph slots in a sound? If a reader ignores it, writing it was
  *     pointless.
@@ -1458,7 +1462,7 @@
  *     flags rather than one "patch mode", since loading and saving happen
  *     at different moments and conflating them is a bug waiting to happen.
  *     Existing patches are unaffected: the extra keys they already contain
- *     are ignored on load, and a key that is now absent means default —
+ *     are ignored on load, and a key that is now absent means default â€”
  *     the same property that has made every earlier format change safe.
  *     v0.998 adds the serial MIDI transport, for the M5Stack Unit MIDI
  *     arriving tomorrow. The unit is a plain UART bridge to a pair of DIN
@@ -1467,13 +1471,13 @@
  *     and no reset loop. It starts unconditionally, since nothing happens
  *     when no unit is plugged in.
  *     Two details from M5's documentation are worth having written down.
- *     The DIP switch must be in BYPASS — M5 state explicitly that only
+ *     The DIP switch must be in BYPASS â€” M5 state explicitly that only
  *     then does the controller's RX pin receive the INPUT socket's signal;
  *     in Separate that pin does nothing, which from the outside is
  *     indistinguishable from a wrong pin or a bad cable. And the baud rate
  *     is 31250, the MIDI 1.0 standard, despite M5's spec table saying
  *     31520; that is a typo of theirs, and an unhelpful one, because the
- *     0.9% error it implies is within what a UART tolerates — the wrong
+ *     0.9% error it implies is within what a UART tolerates â€” the wrong
  *     figure could appear to work.
  *     The pins default to Grove G1/G2 as RX/TX and are #defines, because
  *     which of the pair is which is the one thing that cannot be confirmed
@@ -1482,7 +1486,7 @@
  *     Which is why there is a byte counter: [MIDI] rx prints once a second
  *     while data flows and [MIDI] idle when it stops. Whether BYTES are
  *     arriving separates a wiring, pin or DIP-switch problem from a
- *     parsing one, and from the outside those look identical — silence.
+ *     parsing one, and from the outside those look identical â€” silence.
  *     The pins are overridable from platformio.ini for a reason beyond
  *     that: there is only one Grove port, and the ToF unit for the
  *     theremin idea wants it as well. The EXT 2.54-14P header carries its
@@ -1490,7 +1494,7 @@
  *     v0.9981: nothing arrived on the first hardware test, so the RX pin
  *     now auto-swaps. Which of the Grove pair is RX cannot be settled from
  *     documentation, and getting it wrong presents identically to every
- *     other failure here — silence. Rather than edit a constant, rebuild
+ *     other failure here â€” silence. Rather than edit a constant, rebuild
  *     and reflash to test the other option, it alternates between the two
  *     every three seconds until a byte actually arrives, then locks onto
  *     whichever pin delivered it. Free once data is flowing, and it turns
@@ -1498,10 +1502,10 @@
  *     The startup checklist also now names the Grove 5V DIRECTION switch.
  *     Cardputer ADV can either power a unit from that port or be powered
  *     through it, and set the wrong way the Unit MIDI receives no power at
- *     all — silence again, from a switch on the case rather than anything
+ *     all â€” silence again, from a switch on the case rather than anything
  *     in software.
  *     v0.9982 adds a raw byte dump, because the second hardware test
- *     changed the question. Bytes arrived — four a second, on RX=1,
+ *     changed the question. Bytes arrived â€” four a second, on RX=1,
  *     whether or not a key was pressed. That is Active Sensing and nothing
  *     else: 0xFE roughly every 250ms, which is what a Roland sends to say
  *     it is still connected. Which means the cable, the unit, the DIP
@@ -1509,12 +1513,12 @@
  *     the notes are simply not being transmitted.
  *     So the dump filters out 0xFE and prints everything else in hex. The
  *     log then stays silent until something real arrives, and pressing one
- *     key either prints bytes or prints nothing — which separates "the
+ *     key either prints bytes or prints nothing â€” which separates "the
  *     keyboard is not sending notes" from "the parser is not understanding
  *     them" without any guessing. This is temporary and comes out once the
  *     answer is known; it would flood the log under real playing.
  *     v0.9983: the dump did its job and is gone. With the PCR's own
- *     setting corrected, notes arrived and were textbook — 90 4F 52 then
+ *     setting corrected, notes arrived and were textbook â€” 90 4F 52 then
  *     80 4F 10, Note On and Note Off correctly paired. So the parser was
  *     never the problem. What was silencing them sat in the main loop.
  *     resolveFreqFromKeys() returns 0 when no LOCAL key is down, and its
@@ -1530,7 +1534,7 @@
  *     playing, which is the last-note priority both inputs already use on
  *     their own.
  *     v0.9984 connects MIDI to the arpeggiator, which had been ignoring it
- *     entirely — updateArpHeldNotes() read the built-in keyboard and
+ *     entirely â€” updateArpHeldNotes() read the built-in keyboard and
  *     nothing else. This is the combination most worth having: the local
  *     keyboard manages three keys at once and an arpeggio wants more, so
  *     an arpeggiator that only listens to the local keys is limited by
@@ -1540,18 +1544,18 @@
  *     already an absolute pitch, and applying the local shift would move
  *     the keyboard out from under the player.
  *     Latch needed its own MIDI list. Latch means "keep playing what I
- *     pressed after I let go", so it cannot use midiHeldNotes — that
+ *     pressed after I let go", so it cannot use midiHeldNotes â€” that
  *     empties as fingers lift, which is the very thing Latch exists to
  *     survive. Pressing a latched note again removes it, the same toggle
  *     the local keys use, and clearing the latch clears both halves.
  *     Also: a local key taking over from a sounding MIDI note now
  *     retriggers the envelope. The test was currentFreq==0, so pressing a
  *     local key while MIDI held a note changed the pitch but left the
- *     envelope mid-note — which reads as the built-in keyboard being
+ *     envelope mid-note â€” which reads as the built-in keyboard being
  *     ignored, and was reported as exactly that.
  *     v0.9985 fixes the build: the arpeggiator sits above the MIDI code,
  *     so it could not see the note lists or midiNoteToHz(). Forward
- *     declared rather than moved — they belong with MIDI and the arp is
+ *     declared rather than moved â€” they belong with MIDI and the arp is
  *     the borrower, and this file has gone wrong more than once by
  *     relocating code to satisfy the compiler instead of declaring it. A
  *     static_assert ties the forward-declared array bound to the real one,
@@ -1559,7 +1563,7 @@
  *     as a confusing linker error.
  *     v0.9986: feeding MIDI into the arp's chord was necessary but not
  *     sufficient, because of WHERE that chord is rebuilt. It happens
- *     inside the keyChanged branch of the main loop — only when a LOCAL
+ *     inside the keyChanged branch of the main loop â€” only when a LOCAL
  *     key event occurs. Which explains all three reported symptoms at
  *     once: MIDI alone never started an arpeggio, adding any local
  *     keypress swept the already-held MIDI notes in, and letting go left
@@ -1570,7 +1574,7 @@
  *     MIDI cannot start an arpeggio on a screen where local keys could
  *     not.
  *     Also: releasing the last MIDI note no longer silences a note the
- *     local keyboard is still holding — it zeroed currentFreq
+ *     local keyboard is still holding â€” it zeroed currentFreq
  *     unconditionally, which was reported as the built-in key's sound
  *     vanishing when the MIDI hand lifted.
  *     Not a bug, for the record: with a chord held, the last-pressed note
@@ -1578,7 +1582,7 @@
  *     behaved that way, this is a monophonic synth, and MIDI now matches
  *     it.
  *     v0.99861 adds Program Change, the sustain pedal and the modulation
- *     wheel — the three that cost least and are expected most.
+ *     wheel â€” the three that cost least and are expected most.
  *     Program Change selects a morph slot, so an external keyboard or a
  *     host changes sound and it MORPHS rather than switching, which is
  *     what this synth does. Program 0 is slot 1, lining up with the
@@ -1590,7 +1594,7 @@
  *     The modulation wheel drives vibrato depth via CC1, the near-
  *     universal default, so a wheel does something sensible with no setup.
  *     It writes the vibrato OFFSET rather than the base, so the menu's own
- *     setting stays put and the wheel adds to it — the same arrangement
+ *     setting stays put and the wheel adds to it â€” the same arrangement
  *     the IMU targets use, and the same reuse-don't-duplicate approach as
  *     velocity and pitch bend.
  *     All Notes Off and All Sound Off are honoured too: that is what a
@@ -1598,39 +1602,39 @@
  *     stuck with no way out short of a reboot.
  *     One parser detail worth stating: Program Change carries ONE data
  *     byte where everything else here carries two. Getting that wrong
- *     would not merely lose the message — the parser would sit waiting for
+ *     would not merely lose the message â€” the parser would sit waiting for
  *     a byte that never arrives and swallow whatever came next.
  *     v0.99862 fixes the build: the sustain arrays were written up with
  *     the new CC constants, which sit ABOVE the MIDI_NOTE_STACK constant
  *     that sizes them. Moved down beside the note stack itself. Same trap
- *     as v0.9985, two versions apart — in this file, a declaration's
+ *     as v0.9985, two versions apart â€” in this file, a declaration's
  *     natural home and its legal home are often not the same place.
  *     v0.99863 makes the sustain pedal hold notes played on the BUILT-IN
  *     keyboard too. Previously it only deferred MIDI note-offs, which was
  *     not a design decision so much as a consequence of where the code
  *     sat: a pedal is a performance control and should hold whatever is
  *     being played, not only what arrived over a cable.
- *     It drives the existing noteHeld/heldFreq mechanism — the H key's
- *     Hold — rather than a parallel one, so both routes share the same
+ *     It drives the existing noteHeld/heldFreq mechanism â€” the H key's
+ *     Hold â€” rather than a parallel one, so both routes share the same
  *     state and the H:ON readout stays truthful. A flag records whether
  *     the pedal is the reason Hold is on, because lifting it must not
  *     cancel a Hold the player set with the H key themselves; anything
  *     else that clears Hold clears that flag too.
- *     v0.99871 sends the IMU out as MIDI CC — the first thing this
+ *     v0.99871 sends the IMU out as MIDI CC â€” the first thing this
  *     firmware transmits rather than receives. Tilt the synth and an
  *     external instrument responds, which points the feature people
  *     actually noticed at release outward instead of inward.
  *     Throttling is the whole engineering problem. A MIDI cable carries
  *     about 3125 bytes a second and a CC message is three of them, so
  *     sending on every IMU update would be roughly a thousand messages a
- *     second per axis — enough to swamp the link and delay the notes
+ *     second per axis â€” enough to swamp the link and delay the notes
  *     sharing it. Values go out only when the 7-bit value CHANGES, and
  *     never closer together than 15ms. Change alone would not be enough:
  *     a hand shaking gently across a boundary would transmit
  *     continuously.
  *     The values sent are the same ones the synth is using, so what leaves
  *     the wire matches what is heard, and transmission is gated on the
- *     axis being live — a disabled or held axis stops sending rather than
+ *     axis being live â€” a disabled or held axis stops sending rather than
  *     freezing a receiver at its last value.
  *     Defaults are CC1 on X and CC74 on Y: modulation is what a receiver
  *     is most likely to have mapped, and 74 is filter cutoff by
@@ -1638,7 +1642,7 @@
  *     near-universal names shown beside the number so the common choices
  *     are recognisable rather than bare figures.
  *     This lives in a new MIDI category rather than four more rows on the
- *     IMU page, which is already eleven items over two columns — and it is
+ *     IMU page, which is already eleven items over two columns â€” and it is
  *     where CC receive and clock sync will go. The channel is stored 0-15
  *     and displayed 1-16, as every piece of hardware labels it.
  *     v0.99872 sends notes as well, which turns the Unit MIDI's own
@@ -1648,19 +1652,19 @@
  *     the INPUT socket, so an external keyboard can play C.P.S. and a GM
  *     instrument together with no second piece of hardware anywhere. In
  *     Separate the same bytes leave the OUTPUT socket for external gear
- *     instead, but MIDI in stops working — the unit genuinely cannot do
+ *     instead, but MIDI in stops working â€” the unit genuinely cannot do
  *     both, which is worth knowing before planning around it.
  *     Notes are derived from what the synth is actually SOUNDING rather
  *     than from the key handlers. Local keys, MIDI in, the arpeggiator and
  *     the sequencer all end up setting currentFreq, so watching that one
  *     value covers every source at once instead of needing a hook in each
- *     — and the arpeggiator and sequencer come along for free.
+ *     â€” and the arpeggiator and sequencer come along for free.
  *     GM instruments are chosen by family rather than by numbered
  *     program: sixteen names on a menu row beat 128 numbers, and stepping
  *     picks the first program of each family. The program is sent when
  *     Note Out is switched on, so the chip is playing the chosen sound
  *     from the first note rather than whatever it defaulted to, and
- *     switching Note Out off releases any note still held — otherwise the
+ *     switching Note Out off releases any note still held â€” otherwise the
  *     receiver would sound it forever.
  *     v0.99873 fixes two things found once the send path was audible.
  *     Retargeting a CC left the old one still applied: a CC is a value a
@@ -1674,12 +1678,12 @@
  *     different 7-bit step.
  *     The second was patches losing their IMU enable state when morphed
  *     to. performPatchToneReset() never set imuXEnabled/imuYEnabled, and
- *     patch loads reset first and then parse — so a key the file does not
+ *     patch loads reset first and then parse â€” so a key the file does not
  *     contain means "default", and these two had no default: they simply
  *     kept whatever was live. Patches saved before v0.9921 carry no
  *     imu_x_en at all, so loading one inherited the previous patch's
  *     state and morphing through several could leave an axis off with
- *     nothing on screen explaining it. The report pinned it exactly — the
+ *     nothing on screen explaining it. The report pinned it exactly â€” the
  *     two patches that DO carry the key loaded with the IMU on, the six
  *     older ones did not. Both flags now default to on in the reset,
  *     which is what the rest of the reset already does for every other
@@ -1687,43 +1691,43 @@
  *     v0.99874 fixes two more, one of them mine from the version before.
  *     Releasing a controller by sending 0 is right for an effect depth,
  *     where 0 means none. It is catastrophic for CC7 (Channel Volume) and
- *     CC11 (Expression), where 0 means SILENCE — and with nothing sending
+ *     CC11 (Expression), where 0 means SILENCE â€” and with nothing sending
  *     them again the receiver stays mute until power-cycled. Reported
  *     exactly so: moving off either killed the sound until reset. Each
- *     controller is now released to ITS idle value — full for the two
+ *     controller is now released to ITS idle value â€” full for the two
  *     volume controls, centre for pan, zero for the rest.
  *     And the LFO was missing from PatchSnapshot altogether, so morphing
  *     changed the tone while the previous patch's modulation carried on.
  *     An LFO is as much part of a sound as the filter. Wave and target are
- *     discrete and switch at the start with the waveforms — there is no
+ *     discrete and switch at the start with the waveforms â€” there is no
  *     halfway between a sine and a square, or between modulating pitch and
- *     modulating the filter — while rate and depth interpolate.
+ *     modulating the filter â€” while rate and depth interpolate.
  *     v0.99875 sends pitch bend, which the note-out path needed rather
  *     than merely wanted. midiHzToNote() rounds to the nearest semitone,
  *     so every bend, glide, vibrato, detune and drift was thrown away on
- *     the MIDI side — and worse than lost: Analog Drift reaches +-22
+ *     the MIDI side â€” and worse than lost: Analog Drift reaches +-22
  *     cents, so near a semitone boundary the note number flipped back and
  *     forth and the receiver retriggered repeatedly, a chattering with no
  *     relation to what was being played. Portamento did the same on every
  *     boundary it crossed.
  *     The note number is fixed at note-on now and everything after it
  *     goes out as bend, over the General MIDI default range of +-2
- *     semitones — which the SAM2695, and practically every receiver,
+ *     semitones â€” which the SAM2695, and practically every receiver,
  *     assumes without being told. Beyond that the deviation cannot be
  *     expressed so the note is retriggered, which is right anyway: a glide
  *     of more than a whole tone is a new note musically. The bend is
  *     centred before each note-on, or it would inherit whatever the
  *     previous note was bent to, and it is throttled exactly like the CC
- *     path — a 5Hz vibrato would otherwise emit hundreds of messages a
+ *     path â€” a 5Hz vibrato would otherwise emit hundreds of messages a
  *     second.
  *     v0.99876: none of that reached the receiver, because the bend was
- *     computed from currentFreq — which is only the TARGET note.
+ *     computed from currentFreq â€” which is only the TARGET note.
  *     Everything that makes the pitch expressive is applied inside
  *     audioTask and nowhere else: portamento's glide, key bend, vibrato,
  *     detune, Analog Drift. So the deviation was always about zero and
  *     nothing was ever sent. The sounding pitch is published from the
  *     audio loop now (playF*pr, the value the oscillator actually uses)
- *     and both the bend and the retrigger test read it — testing one
+ *     and both the bend and the retrigger test read it â€” testing one
  *     against currentFreq while bending from the other would let the two
  *     disagree about when a new note is due. Sampled once per buffer,
  *     since the MIDI side is throttled to 15ms and per-sample accuracy
@@ -1755,7 +1759,7 @@
  *     being hidden.
  *     v0.99881: overwriting a patch left the morph slots holding the OLD
  *     sound. Snapshots were built at boot and when an assignment changed,
- *     and nowhere else — so saving over a patch updated the file, Load
+ *     and nowhere else â€” so saving over a patch updated the file, Load
  *     read the new version, and morphing replayed what had been captured
  *     before the edit. The two disagreeing about the same patch name reads
  *     as corruption rather than as a missing refresh, which is what makes
@@ -1764,7 +1768,7 @@
  *     matched by name because one patch can occupy several slots.
  *     The boot rebuild also logs each slot's cutoff and attack now. If a
  *     slot still reports pre-edit numbers after a REBOOT then the fault is
- *     in reading the file rather than in when the snapshot was taken —
+ *     in reading the file rather than in when the snapshot was taken â€”
  *     from the outside those two look the same, and this separates them.
  *     v0.99882 answers two things noticed while testing CC in.
  *     Turning an external knob changed the sound but nothing on the VCF
@@ -1773,11 +1777,11 @@
  *     tilt) writes filterCutoffOffset. A control that works but shows
  *     nothing reads as a control that is not connected. Both now use
  *     effectiveCutoffHz(), which mirrors the audio path's own scaling
- *     exactly — positive offset pulls the cutoff down by up to 90%. The
+ *     exactly â€” positive offset pulls the cutoff down by up to 90%. The
  *     screen already redraws on a 100ms tick, so it follows.
  *     And the CC destinations stepped through thirty targets one key
  *     press at a time. They open the IMU picker now, which already
- *     presents those targets in named sections — the IMU page moved away
+ *     presents those targets in named sections â€” the IMU page moved away
  *     from cycling for exactly this reason. The picker gained two more
  *     "axis" codes rather than a second picker being written: one list to
  *     keep in step instead of two, and the outgoing target's offset is
@@ -1786,13 +1790,13 @@
  *     switched to the effective value; resonance, the cutoff MARKER and
  *     the frequency label on the graph were all left reading the knob
  *     position. So a CC or a tilt moved the curve while the yellow marker
- *     stayed put — the page disagreeing with itself, which is worse than
+ *     stayed put â€” the page disagreeing with itself, which is worse than
  *     the original problem of nothing moving at all. All four now use the
  *     same effective values the audio path does.
  *     Worth noting the marker is not a reference line for the base
  *     setting: it marks where the filter IS, so it has to track.
  *     v0.9989 receives MIDI clock, and first puts the diagnostic logs
- *     behind build flags — which is why that came first rather than being
+ *     behind build flags â€” which is why that came first rather than being
  *     tidying for its own sake. Clock arrives 24 times per BEAT, so the
  *     per-second byte counter would never fall silent again, and a log
  *     that always says something says nothing. CPS_LOG_AUDIO, CPS_LOG_MIDI
@@ -1806,7 +1810,7 @@
  *     dropped; deriving a tempo means the existing timing code carries on
  *     unchanged, simply reading a number that now comes from outside.
  *     Nothing in the sequencer had to be touched.
- *     Averaged over one beat, because a single interval is far too noisy —
+ *     Averaged over one beat, because a single interval is far too noisy â€”
  *     serial jitter alone swings the reading by several BPM, and a tempo
  *     display flickering that much looks broken even when the timing is
  *     fine. Intervals outside a generous window are treated as a restart
@@ -1822,25 +1826,25 @@
  *     v0.99891 covers two things found once the clock worked.
  *     SEQ step entry ignored an external keyboard:
  *     seqResolveFreqExcludingDel() reads the built-in keys only. Not a
- *     decision — and the wrong one to leave, since entering steps is where
+ *     decision â€” and the wrong one to leave, since entering steps is where
  *     playing the pitch you want in the octave you want matters most and
  *     where the built-in three-key limit matters least. MIDI notes enter
  *     steps now, with local keys taking precedence when both are down (the
  *     rule the note path already uses), and the MIDI note's velocity
- *     becomes the step's velocity — a keyboard that sends velocity is
+ *     becomes the step's velocity â€” a keyboard that sends velocity is
  *     saying exactly what that step should be.
  *     And the PLAY screen shows tempo and rate while the arpeggiator is
  *     running, on the line the frequency readout uses when it is off. That
  *     line is unused with the arp on, the note list above already says
  *     WHAT is playing, so the missing information is how fast. An external
- *     clock's tempo appears there too, marked with a tilde — otherwise
+ *     clock's tempo appears there too, marked with a tilde â€” otherwise
  *     that value is visible only inside the MIDI menu.
  *     v0.99892 lets MIDI switch things on and off, and splits the MIDI
  *     menu to make room.
  *     Two more CC slots, but for things that TOGGLE rather than sweep:
  *     portamento, hold, the arpeggiator and its latch. These could not use
  *     the existing CC destinations, because that list is built from
- *     ImuTarget and ImuTarget by definition holds continuous parameters —
+ *     ImuTarget and ImuTarget by definition holds continuous parameters â€”
  *     a knob mapped to a toggle is useless. They are treated as momentary
  *     switches: 64 or above is pressed, below is released, which is what
  *     pedals and pads send, and the toggle fires on the press only so
@@ -1848,24 +1852,24 @@
  *     slots are checked before the continuous ones, since aiming a switch
  *     at a number is the more specific intent.
  *     Hold goes through a callable that mirrors what the H key does,
- *     capturing the frequency rather than just flipping the flag — a Hold
+ *     capturing the frequency rather than just flipping the flag â€” a Hold
  *     with no note captured does nothing at all.
  *     The MIDI page had reached twelve rows and this would not fit, so it
  *     is now MIDI > Out and MIDI > In. Room is the occasion rather than
  *     the reason: sending and receiving are two different jobs that were
  *     sharing a page only because they share a word. Channel stays with
- *     Out, being the one direction it applies to — reception is Omni.
+ *     Out, being the one direction it applies to â€” reception is Omni.
  *     v0.99893: a latching button needed two presses per change, and the
  *     cause was an assumption rather than the controller. Controllers send
  *     these two ways and neither is wrong. A momentary pad or pedal sends
- *     127 while held and 0 on release — the press is the event and the
+ *     127 while held and 0 on release â€” the press is the event and the
  *     release means nothing. A button in LATCH mode sends 127, then 0 on
  *     the next press: the value IS the state and both edges are events.
  *     Acting only on the press discarded the 0, so only every other press
  *     of a latching button did anything. Assuming the opposite would have
  *     been wrong in the other direction, letting a pad's release switch
  *     things off.
- *     So the mode is per slot — a sustain pedal on one and a panel button
+ *     So the mode is per slot â€” a sustain pedal on one and a panel button
  *     on the other is an ordinary setup, not a corner case. Latch mode
  *     compares the incoming state against the current one and calls the
  *     same toggle function when they differ, rather than setting the flag
@@ -1881,8 +1885,8 @@
  *     arpeggiator is actually PLAYING live in arpHeldFreqs[], and that is
  *     only rebuilt inside the keyChanged branch of the main loop. From a
  *     key, that branch runs immediately; from MIDI nothing asked for it.
- *     Exactly the shape of the v0.9986 fault — the arp's chord has two ways
- *     in and only one of them triggered a rebuild — which is worth noting
+ *     Exactly the shape of the v0.9986 fault â€” the arp's chord has two ways
+ *     in and only one of them triggered a rebuild â€” which is worth noting
  *     because it means the rebuild's placement, not the latch, is the thing
  *     that keeps being wrong.
  *     The MIDI switch handler now requests a rebuild after any of the four
@@ -1892,12 +1896,12 @@
  *     v0.99895 sends MIDI clock, the counterpart to receiving it and the
  *     last thing missing from the send direction: other gear follows
  *     C.P.S.'s tempo instead of setting it, and Start/Stop travel with it
- *     so pressing play here starts the other machine — the same courtesy
+ *     so pressing play here starts the other machine â€” the same courtesy
  *     clock in already extends to us.
  *     Two details decide whether a generated clock is usable. The deadline
  *     advances by exactly one interval rather than being reset to now, or
  *     every late call would push the tempo permanently flat. And if it
- *     falls far behind — a long redraw, a card write — the missed clocks
+ *     falls far behind â€” a long redraw, a card write â€” the missed clocks
  *     are abandoned rather than fired as a burst, which would arrive as a
  *     stumble.
  *     It refuses to generate while following an incoming clock: two
@@ -1907,21 +1911,21 @@
  *     nothing arriving.
  *     Worth stating the hardware limit again: this only reaches external
  *     gear with the unit's DIP in Separate. In Bypass the controller's TX
- *     goes to the SAM2695 alone, which ignores clock — harmless, just
+ *     goes to the SAM2695 alone, which ignores clock â€” harmless, just
  *     pointless.
  *     v0.99896 fixes clock out reaching a sequencer only intermittently
  *     and never carrying tempo. The cause was the RX pin auto-search from
  *     v0.9981, which had no way to stop.
  *     It was written to find which Grove pin is RX and then get out of the
  *     way, and it does stop the moment a byte arrives. But nothing ever
- *     arrives with the unit's DIP in Separate — that is the mode where the
+ *     arrives with the unit's DIP in Separate â€” that is the mode where the
  *     RX pin is not connected at all, and it is also the only mode where
  *     output reaches the OUTPUT socket. So the two features needed each
  *     other's opposite, and the search swapped forever, every three
  *     seconds. Each swap calls midiSerial.end()/begin(): the UART is torn
  *     down mid-send and the TX pin moves with it, so transmission worked
  *     in roughly half of alternating three-second slices. Which is exactly
- *     how it presented — responding sometimes, never following tempo. The
+ *     how it presented â€” responding sometimes, never following tempo. The
  *     log said so plainly in hindsight, alternating RX=1 and RX=2 forever.
  *     Two limits. It never runs while any send feature is enabled, since
  *     tearing down the UART to look for input is not worth breaking output
@@ -1929,7 +1933,7 @@
  *     which is what this hardware actually uses.
  *     v0.999 adds the theremin: a VL53L1X on the Grove port plays pitch by
  *     hand height, the way a theremin's pitch antenna does, with volume
- *     staying on the IMU tilt so one unit is enough — the constraint this
+ *     staying on the IMU tilt so one unit is enough â€” the constraint this
  *     was designed around from the start.
  *     It drives currentFreq and the envelope exactly as the MIDI note path
  *     does, so the filter, the effects, the arpeggiator and note-out all
@@ -1942,7 +1946,7 @@
  *     light and a faster update, and a theremin is played within arm's
  *     reach.
  *     Moving the hand AWAY lowers the pitch, as on the real instrument.
- *     Out of range stops the note rather than holding the last pitch —
+ *     Out of range stops the note rather than holding the last pitch â€”
  *     taking your hand away should silence it. Pitch can be continuous or
  *     snapped to semitones: continuous is authentic, but a theremin is
  *     famously hard to play in tune and the snap makes it usable alongside
@@ -1953,7 +1957,7 @@
  *     want it rather than by guessing.
  *     v0.9991: the sensor was not found. Which Grove pin is SDA cannot be
  *     settled from documentation any more than the MIDI RX pin could, so
- *     both orders are tried — but unlike that case this runs ONCE at boot,
+ *     both orders are tried â€” but unlike that case this runs ONCE at boot,
  *     with no search left running to tear the bus down later.
  *     The bus is also scanned and every address logged, because "not
  *     found" has several causes that look identical from the outside:
@@ -1963,13 +1967,13 @@
  *     scan is what cost several versions on the MIDI side.
  *     v0.9992: that scan never appeared in the log at all. It ran beside
  *     the MIDI UART setup, milliseconds into boot, before a serial monitor
- *     could attach — the same trap the SD and MIDI diagnostics fell into,
+ *     could attach â€” the same trap the SD and MIDI diagnostics fell into,
  *     and the third time a diagnostic has been unreadable for want of
  *     timing luck.
  *     Two changes so it does not depend on luck. The scan runs after the
  *     SD work, late enough to catch. And its result is shown on the
  *     Theremin page: the row says "no i2c device" when nothing answered on
- *     the bus at all — wiring or power — or the address and "init fail"
+ *     the bus at all â€” wiring or power â€” or the address and "init fail"
  *     when something is there but is not this sensor. Those two need
  *     different fixes and previously looked identical. A Rescan row
  *     reports how many devices were seen and repeats the search, so a unit
@@ -1980,18 +1984,18 @@
  *     twice, and those three were the board's own 0x18/0x34/0x69. M5
  *     Cardputer initialises Wire1 during its own startup, and a later
  *     begin() with different pins does NOT move a bus that has already
- *     started — so the scan was walking the internal I2C bus. Wire.end()
+ *     started â€” so the scan was walking the internal I2C bus. Wire.end()
  *     first forces the reconfiguration.
  *     It now looks for 0x29, the VL53L1X's own address, rather than for
  *     any device at all. That would have made the fault obvious at once
  *     instead of reading as a wiring problem, and it distinguishes an
- *     empty bus from a bus carrying only the board's own chips — two
+ *     empty bus from a bus carrying only the board's own chips â€” two
  *     cases needing different fixes. The count also resets per scan, which
  *     is why the row climbed by six on every press.
  *     Four pin pairs are tried, Grove in both orders and then the EXT
  *     header's, since neither could be confirmed from documentation.
  *     v0.99904 moves the sensor to I2C port 0 and stops touching Wire1 at
- *     all. Wire1 is the board's OWN bus — keyboard and IMU at SDA=8/SCL=9,
+ *     all. Wire1 is the board's OWN bus â€” keyboard and IMU at SDA=8/SCL=9,
  *     which is precisely why the earlier scan found 0x18, 0x34 and 0x69 on
  *     it. Repointing it at the Grove pins took the bus away from them, and
  *     M5's library reads the IMU every frame, so it claimed the bus
@@ -2000,8 +2004,8 @@
  *     Wire1 was chosen to avoid disturbing the keyboard, which was exactly
  *     backwards.
  *     Readings are also checked against range_status now. With nothing in
- *     front of it the sensor still returns a number — large and wandering
- *     — and turning those into notes is what produced random pitches out
+ *     front of it the sensor still returns a number â€” large and wandering
+ *     â€” and turning those into notes is what produced random pitches out
  *     of an empty room.
  *     v0.99905 fixes the pitch freezing and the stray high notes.
  *     The measurement takes 20ms and the repeat interval was also 20ms, so
@@ -2011,7 +2015,7 @@
  *     pitch locked to whatever height the hand first appeared at. The
  *     interval is 33ms now.
  *     The base note also had an octave added to it, putting the whole
- *     range an octave above where the synth was playing — a "1 oct"
+ *     range an octave above where the synth was playing â€” a "1 oct"
  *     setting produced notes far higher than the octave it was meant to
  *     span. Removed.
  *     And a single reading is no longer enough evidence in either
@@ -2024,32 +2028,32 @@
  *     audioTask copies currentFreq into playingFreq at the moment a note
  *     ATTACKS, and playingFreq is what the oscillator uses. Every other
  *     input retriggers per note, so latching at attack is exactly right
- *     for them. A theremin is the opposite case — one note that never
- *     stops while its pitch moves continuously — so it was changing a
+ *     for them. A theremin is the opposite case â€” one note that never
+ *     stops while its pitch moves continuously â€” so it was changing a
  *     value nothing was listening to any more. That is why Reading tracked
  *     the hand smoothly while the pitch stayed wherever the hand first
  *     entered: the two symptoms were the same fault seen from both ends.
  *     playingFreq is written directly now, and portaFreq alongside it when
  *     portamento is on.
  *     Reading also clears when the sensor sees nothing, instead of holding
- *     the last distance — an empty sensor looked like a held hand.
+ *     the last distance â€” an empty sensor looked like a held hand.
  *     v0.99907: with the hand away the pitch wandered on its own, and
  *     pressing a key set it looping. Stopping the theremin cleared
- *     currentFreq and the smoothed pitch but not portaFreq — and
+ *     currentFreq and the smoothed pitch but not portaFreq â€” and
  *     portamento glides portaFreq toward currentFreq, so leaving it at the
  *     last pitch while currentFreq went to zero made it slide down to
  *     nothing by itself. A keypress restarted the glide from wherever it
  *     had got to, which is the loop.
  *     Stopping now happens in one function rather than being spelled out
  *     at each of its three call sites, which is how one of the four values
- *     came to be missed. Zero is this codebase's "unset" for portaFreq —
- *     the note path tests portaFreq<=0 before seeding it — so that is what
+ *     came to be missed. Zero is this codebase's "unset" for portaFreq â€”
+ *     the note path tests portaFreq<=0 before seeding it â€” so that is what
  *     it is set to.
  *     v0.99908 rewrites the decision instead of patching it again.
  *     "Is this a real measurement" and "is the hand inside the playing
  *     window" were separate tests with separate early exits, and only the
  *     first reset the good-reading counter. At the edges the two disagreed
- *     several times a second, so the note stopped and started repeatedly —
+ *     several times a second, so the note stopped and started repeatedly â€”
  *     and every restart is an ATTACK at whatever pitch the next reading
  *     happened to give. That is where the bursts of high notes came from,
  *     and why they appeared exactly when hovering at the far limit or
@@ -2059,13 +2063,13 @@
  *     rather than recomputed from a reading already judged unusable.
  *     The EXT header's pins are also no longer guessed at. They were tried
  *     in case a unit was attached there, but configuring I2C on pins that
- *     may be wired to something else is a real risk for no benefit — the
+ *     may be wired to something else is a real risk for no benefit â€” the
  *     sensor is on Grove, and a board with NO sensor was misbehaving.
  *     v0.99909 stops touching the I2C bus unless asked, which is what that
  *     last sentence should have led to immediately.
  *     Probing means reconfiguring an I2C peripheral, and one of the two
  *     belongs to M5's library, carrying the keyboard and the IMU. Taking
- *     it away makes the IMU read nonsense — heard as parameters moving on
+ *     it away makes the IMU read nonsense â€” heard as parameters moving on
  *     their own, the waveform changing, and notes appearing with nothing
  *     in front of the sensor. Every one of those was reported with no
  *     sensor attached, which rules the theremin's own code out and points
@@ -2086,7 +2090,7 @@
  *     unconditionally at boot regardless of what is actually plugged in,
  *     and configuring I2C on top of a running UART on the same GPIOs is a
  *     genuine electrical conflict, not a software race. Corrupted bytes on
- *     the MIDI side read as random Note On/Off and CC messages — which is
+ *     the MIDI side read as random Note On/Off and CC messages â€” which is
  *     where the phantom notes, the runaway pitch, and parameters moving on
  *     their own actually came from, including with no ToF unit attached at
  *     all, since the UART alone was enough to misbehave once I2C
@@ -2104,12 +2108,12 @@
  *     the function that actually touches GPIO1/2, but only
  *     thereminToggle() suspended MIDI before calling it. Called directly
  *     from boot when a saved setting restored Theremin as already on, the
- *     UART was never suspended and the same conflict happened again —
+ *     UART was never suspended and the same conflict happened again â€”
  *     which is consistent with the report of it working only after a
  *     second reset: a peripheral left in a bad state by a live pin
  *     conflict is the kind of thing a full power cycle clears and a soft
  *     reset may not. It also explains the stray waveform changes settling
- *     on Sine at 50% Shape, the firmware's own default — corrupted MIDI
+ *     on Sine at 50% Shape, the firmware's own default â€” corrupted MIDI
  *     bytes landing as something close to a patch reset.
  *     Suspending now happens inside thereminBegin() itself, so boot, the
  *     toggle and Rescan are all covered by the one place that owns the
@@ -2119,7 +2123,7 @@
  *     Separately: the first several readings after (re)starting continuous
  *     ranging are now discarded. VL53L1X datasheets note those can be
  *     unreliable while the sensor settles, and a stray one at connect time
- *     is a stray note — which matches the 1-2 seconds of pitch reported
+ *     is a stray note â€” which matches the 1-2 seconds of pitch reported
  *     with nothing in front of the sensor. Counted down inside
  *     thereminUpdate() rather than delayed in thereminBegin(), so boot is
  *     not blocked waiting for it.
@@ -2129,11 +2133,11 @@
  *     always gliding toward whichever semitone had just been picked and
  *     never actually landed on it, so Semitone sounded like a mildly
  *     stepped Smooth rather than real steps. Smoothing now runs on the raw
- *     continuous pitch, quantizing happens after — once the smoothed
+ *     continuous pitch, quantizing happens after â€” once the smoothed
  *     value crosses a semitone boundary the output jumps straight there.
  *     Toggling Theremin on or off froze the UI for several seconds. The
  *     cause was thereminBegin() sweeping all 126 I2C addresses every time
- *     it ran, including every ON toggle — each address is a transaction
+ *     it ran, including every ON toggle â€” each address is a transaction
  *     carrying the platform's I2C timeout when nothing answers, which adds
  *     up fast. The sensor's address is known (0x29), so the normal path
  *     now checks only that one address; the full 126-address sweep is
@@ -2141,7 +2145,7 @@
  *     actually reading the result.
  *     v0.99913 addresses two things from real hardware photos and reports
  *     rather than guessing further at code already changed twice.
- *     The Cap LoRa-1262's Grove port silkscreen reads G8 SDA / G9 SCL —
+ *     The Cap LoRa-1262's Grove port silkscreen reads G8 SDA / G9 SCL â€”
  *     the exact pins M5's library already uses for the keyboard and IMU.
  *     It is not a second bus, it is a tap on the same internal one, which
  *     I2C's multi-drop wiring supports and UART never could. Selecting it
@@ -2158,7 +2162,7 @@
  *     runs, and a LoRa module's inrush current is the kind of load that
  *     dips a rail right at power-on. A 150ms wait is added before the
  *     existing SD retry, but only when esp_reset_reason() reports a
- *     genuine POWERON_RESET — a Launcher-triggered soft reset does not
+ *     genuine POWERON_RESET â€” a Launcher-triggered soft reset does not
  *     wait at all, since power is already settled by then.
  *     And the toggle freeze, still present after the fast-probe fix,
  *     is timed rather than patched again: a probe under a millisecond
@@ -2166,16 +2170,16 @@
  *     now logs how long it actually took, to find the real remainder
  *     instead of trading one guess for another.
  *     v0.99914 has the answer, from the log: the toggle itself measured
- *     0ms — it was never the source — and what followed was an unbounded
+ *     0ms â€” it was never the source â€” and what followed was an unbounded
  *     stream of "i2cRead returned Error 263" with no way out short of a
  *     reboot. The sensor's per-call timeout drops from 200ms to 50ms, and
  *     thirty consecutive failures now disables Theremin outright rather
  *     than retrying forever: the menu reports "lost connection", distinct
  *     from the boot-time reasons, since this means the sensor was working
- *     and then stopped — a wiring, power, or interference question during
+ *     and then stopped â€” a wiring, power, or interference question during
  *     use rather than at startup. A single success resets the count, so
  *     ordinary transient glitches never approach the limit.
- *     Separately, the Cap's own Grove port confirmed working — sharing
+ *     Separately, the Cap's own Grove port confirmed working â€” sharing
  *     M5's bus rather than reconfiguring it was the right call.
  *     And the SD-under-Cap theory from v0.99913 turned out to be
  *     incomplete: crc errors recur through the whole retry sequence on
@@ -2183,13 +2187,13 @@
  *     smooth over, which looks like continuous interference on the SPI
  *     lines rather than a one-off dip. A slower final rate and a slightly
  *     longer gap between attempts are added, on the honest expectation
- *     that they may only help rather than fully fix it — persistent
+ *     that they may only help rather than fully fix it â€” persistent
  *     interference is a wiring or shielding question no retry loop can
  *     solve outright.
  *     v0.99915 corrects an error in the version before it, found by doing
  *     the arithmetic properly instead of jumping to a bigger theory. The
  *     failure interval in the freeze log was about 2 seconds, and thirty
- *     of them — the v0.99914 threshold — takes roughly a minute to reach.
+ *     of them â€” the v0.99914 threshold â€” takes roughly a minute to reach.
  *     The captured log only spanned 16-20 seconds. Auto-disable had not
  *     failed to fire; it had not had time to. A one-minute stall before
  *     recovering is still bad even once it ends, so the threshold drops
@@ -2198,17 +2202,17 @@
  *     failure would produce an error every 15-50ms, not one every two
  *     seconds. Roughly one failure in over a hundred read attempts, with
  *     pitch tracking otherwise reported as working, reads as a marginal
- *     connection — a Grove cable or connector seated imperfectly — rather
+ *     connection â€” a Grove cable or connector seated imperfectly â€” rather
  *     than as another peripheral contending for the same bus.
  *     v0.99916 answers the SD-under-Cap question properly, prompted by
  *     the owner noting the Launcher mounts the card fine with the Cap
- *     attached on the very same cold boot — which the v0.99913/v0.99914
+ *     attached on the very same cold boot â€” which the v0.99913/v0.99914
  *     "continuous interference" theory could not explain, since Launcher
  *     runs on identical hardware under identical conditions. If the
  *     problem were genuinely electrical, Launcher would see it too.
  *     M5's own Cap LoRa868/1262 tutorial gives the SX1262's pins directly:
  *     NSS (chip select) is GPIO5. This firmware never touched it, so with
- *     the Cap attached it sat floating — and SPI is a shared bus by
+ *     the Cap attached it sat floating â€” and SPI is a shared bus by
  *     design, where every device's chip select must be held deselected or
  *     it can answer for someone else. A floating CS reading as asserted,
  *     with the LoRa chip responding to SD commands, matches "GO_IDLE_STATE
@@ -2217,12 +2221,12 @@
  *     costing nothing when no Cap is attached.
  *     v0.99917 finds why the freeze's auto-disable never fired, prompted
  *     by the owner questioning whether Grove-only support was really a
- *     large undertaking — which turned the search toward a bug rather
+ *     large undertaking â€” which turned the search toward a bug rather
  *     than another architecture theory.
  *     Pololu's own VL53L1X source shows did_timeout is set only inside
  *     read(true)'s blocking wait loop. This code calls read(false)
  *     specifically so a stalled sensor cannot block the main loop, and
- *     that path skips the loop entirely — did_timeout is never touched
+ *     that path skips the loop entirely â€” did_timeout is never touched
  *     here no matter what the underlying I2C transaction did. The
  *     consecutive-failure counter across v0.99914 and v0.99915 was
  *     watching a flag that call was never going to set. It was not that
@@ -2232,7 +2236,7 @@
  *     external Grove cable, ordinary and expected, is enough on its own
  *     once failures go uncounted forever. Cap's internal connection being
  *     more reliable doesn't require Wire being claimed elsewhere to
- *     explain the difference — a shorter, direct connection glitching
+ *     explain the difference â€” a shorter, direct connection glitching
  *     less than an external cable does not need a second explanation.
  *     Detection is time-based now: how long since a reading last
  *     succeeded, tracked independently of any internal flag. A result of
@@ -2240,7 +2244,7 @@
  *     reports no timeout, since a failed transaction can still hand back
  *     a stale or garbage value without setting anything. Three seconds
  *     without a good reading disables Theremin and reports "lost
- *     connection" — a dedicated flag now, cleared on every fresh probe,
+ *     connection" â€” a dedicated flag now, cleared on every fresh probe,
  *     rather than inferred from other state that happened to line up.
  *     v0.99918 makes Semitone mode snap to the active Pro Style scale
  *     instead of flat chromatic steps. Chromatic snapping meant every
@@ -2252,18 +2256,18 @@
  *     replaces.
  *     thereminQuantizeToHz() searches every degree of the active scale
  *     across a couple of octaves either side of the theremin's range and
- *     keeps the closest — the same brute-force approach
+ *     keeps the closest â€” the same brute-force approach
  *     recomputeKeyNotes() already uses to build the keyboard rows. At
  *     under a dozen scale degrees and a handful of octaves this is cheap
  *     enough for every 33ms reading.
  *     v0.99919 fixes "lost connection" firing constantly on BOTH Grove
- *     and Cap, which is what gave this one away — Cap's shared bus had
+ *     and Cap, which is what gave this one away â€” Cap's shared bus had
  *     never produced a single error before, so a bus-specific cause was
  *     ruled out immediately and the fault had to be in logic common to
  *     both.
  *     It was: "still talking to the sensor" and "a target is currently in
- *     range" got conflated in v0.99917. A RangeStatus other than Valid —
- *     nothing detected, a weak signal — is an entirely ordinary result,
+ *     range" got conflated in v0.99917. A RangeStatus other than Valid â€”
+ *     nothing detected, a weak signal â€” is an entirely ordinary result,
  *     exactly what a working sensor reports whenever nothing is in front
  *     of it, which happens constantly during normal playing: a hand
  *     lifted between notes, a pause, adjusting position. Feeding that
@@ -2272,20 +2276,20 @@
  *     regardless of bus, and no amount of reseating a cable was ever
  *     going to touch it.
  *     dataReady() returning true is what actually shows the connection is
- *     alive — a fresh measurement read successfully over I2C this cycle,
+ *     alive â€” a fresh measurement read successfully over I2C this cycle,
  *     whatever it turned out to say. The watchdog resets on that alone
  *     now. Whether the measurement is usable for a note remains the
  *     separate question it always was, decided afterward and unchanged.
  *     Also: Rescan's count on the Cap's shared bus legitimately includes
  *     the keyboard controller, the IMU, and whatever else already lives
- *     there — not a miscount. Grove's bus carries only the sensor and
+ *     there â€” not a miscount. Grove's bus carries only the sensor and
  *     still shows a plain count; Cap's now reads "N shared" so a higher
  *     number there doesn't look like an error.
  *     v0.9992 continues the Theremin phase, since it did not wrap up in
- *     v0.9990x — two more fixes reported after real playing.
+ *     v0.9990x â€” two more fixes reported after real playing.
  *     Toggling Theremin on with nothing in front of the sensor could
  *     still trip "lost connection" within a second or two, on Grove only,
- *     and only before the first real reading arrived — once ANY target
+ *     and only before the first real reading arrived â€” once ANY target
  *     had been detected once, the connection stayed solid until the next
  *     toggle. That is a settling-time pattern, not a fault: right after
  *     startContinuous(), dataReady() can go a beat longer than usual
@@ -2298,7 +2302,7 @@
  *     Deriving the theremin's top note from params.octaveShift meant the
  *     playable range moved whenever the keyboard's own octave did, and
  *     reaching a higher theremin range meant pushing the keyboard itself
- *     out of a comfortable register at the same time — there was no way
+ *     out of a comfortable register at the same time â€” there was no way
  *     to have both. Top is its own setting now, a plain semitone offset
  *     from C4 (thereminTopSemis), shown as a note name and stepped an
  *     octave at a time since semitone precision at the ceiling isn't the
@@ -2308,13 +2312,13 @@
  *     Two fixes applied on top without a version bump, per the owner's
  *     request to save version numbers for confirmed-working states.
  *     thereminLastGoodMs was declared below thereminBegin(), which uses
- *     it — moved above, next to thereminLastMm. And tofBusIndex (Grove vs
+ *     it â€” moved above, next to thereminLastMm. And tofBusIndex (Grove vs
  *     Cap) was never saved or loaded at all, so a reboot always came back
  *     to Grove regardless of what had been selected; it now persists
  *     under "thr_bus".
  *     v0.99921: Transpose is reapplied to the theremin's top note.
  *     Octave was deliberately dropped in v0.9992 because it dragged the
- *     whole theremin range along with the keyboard's own register —
+ *     whole theremin range along with the keyboard's own register â€”
  *     Transpose is a different kind of setting, a small deliberate
  *     key-of-the-song shift, and a scale locked to C regardless of it
  *     defeated the point of Semitone mode's scale-following added in
@@ -2331,19 +2335,19 @@
  *     for a conflict that could never happen. What made it look fixable
  *     by toggling Theremin off and on was a second, unrelated bug: OFF
  *     never cleared tofPresent, so the ON toggle's `if(!tofPresent)`
- *     guard skipped thereminBegin() entirely — which incidentally also
+ *     guard skipped thereminBegin() entirely â€” which incidentally also
  *     skipped re-suspending MIDI, restoring it as a side effect. The
  *     suspend call is now gated on tofBusIndex==0, so Cap-based Theremin
  *     never touches MIDI in the first place.
  *     On the lost-connection question: Cap's tolerance isn't something
  *     Grove can safely copy outright, because Cap's bus is kept alive by
  *     unrelated keyboard/IMU traffic, while Grove's dataReady() is the
- *     only signal that bus has — silently ignoring failures there would
+ *     only signal that bus has â€” silently ignoring failures there would
  *     also hide a genuine unplug forever, which the original cable-pull
  *     test relied on catching. So instead of disabling on loss and
  *     waiting for a manual toggle, thereminUpdate() now retries the exact
  *     probe automatically every 500ms while lost, via thereminBegin()
- *     itself — cheap on a miss (one transaction on Grove, none on Cap).
+ *     itself â€” cheap on a miss (one transaction on Grove, none on Cap).
  *     A transient hiccup clears itself the moment a reading succeeds
  *     again, with nothing for the player to do; a genuine outage simply
  *     stays silent for as long as it lasts, which is the correct outcome
@@ -2351,33 +2355,33 @@
  *     v0.9993 closes the Theremin phase and fixes a longstanding envelope
  *     bug it happened to surface: notes that never stopped ringing on the
  *     Piano, Pluck and Bells starter patches unless Release was exactly 0.
- *     What those three share is sustainLevel=0 — decay-only, percussive
+ *     What those three share is sustainLevel=0 â€” decay-only, percussive
  *     envelopes. RELEASE's decrement was `dt/releaseTime*sustainLevel`,
  *     which is zero whenever sustainLevel is zero, regardless of what
  *     envLevel actually is. Releasing a key mid-DECAY, before it reached
- *     sustainLevel, put envLevel at whatever DECAY had reached so far —
+ *     sustainLevel, put envLevel at whatever DECAY had reached so far â€”
  *     and with the decrement permanently zero, it stayed there forever.
  *     Release=0 took a separate branch that skipped this entirely, which
  *     is why only nonzero Release hung. The filter envelope carried the
  *     exact same formula and the exact same bug, just less audible: a
  *     stuck-open filter rather than a note that never stops.
- *     Fixed by capturing the level RELEASE actually starts from —
+ *     Fixed by capturing the level RELEASE actually starts from â€”
  *     envReleaseStartLevel / filterEnvReleaseStartLevel, set once on
- *     entry to RELEASE from whichever phase preceded it — and decrementing
+ *     entry to RELEASE from whichever phase preceded it â€” and decrementing
  *     proportionally to THAT instead of to sustainLevel. Releasing from a
  *     held SUSTAIN reduces to exactly the old formula, since the captured
  *     level equals sustainLevel there, so existing patches that release
  *     normally are timed identically to before; only release interrupting
  *     ATTACK or DECAY behaves differently, which is precisely the case
  *     that was broken.
- *     This was never Theremin-specific — any input releasing mid-decay on
+ *     This was never Theremin-specific â€” any input releasing mid-decay on
  *     a zero-sustain patch would have hit it, keyboard included, and the
  *     Theremin phase closes here, with the ARP-tidying phase (v0.9993x)
  *     starting from the same version number.
  *     v0.99931 begins the ARP-tidying phase promised there, taking option
  *     B: one funneled entry point rather than a rebuild on every loop.
  *     Every previous bug in this area (v0.9986, v0.99891, v0.99894) had
- *     the same shape — a function that read local keys AND rebuilt the
+ *     the same shape â€” a function that read local keys AND rebuilt the
  *     chord welded into one, called from two unrelated places (a
  *     keyChanged branch, and a midiNotesDirty flag polled from loop()),
  *     so whichever call site existed when a new feature was added often
@@ -2386,25 +2390,25 @@
  *     the part that is genuinely keyChanged-only: detecting a NEW
  *     physical keypress by diffing against the previous frame, which only
  *     means anything at the instant a key transitions, and stays called
- *     from that branch alone. rebuildArpChord() is everything else —
+ *     from that branch alone. rebuildArpChord() is everything else â€”
  *     building arpHeldFreqs[]/arpSortedFreqs[] from whichever state is
- *     current — and is now the one place every path that changes what
+ *     current â€” and is now the one place every path that changes what
  *     should be sounding calls directly: the local key branch, MIDI note
  *     on/off, a switch toggling Latch, MIDI panic, and Latch's own
  *     toggle function. The midiNotesDirty flag and its loop()-polling
  *     consumer are gone entirely, since nothing sets a flag for later
- *     any more — each caller just calls rebuildArpChord() when it has
+ *     any more â€” each caller just calls rebuildArpChord() when it has
  *     something to report.
  *     The screen/mode eligibility check (arpEnabled, not mid-SEQ, not on
  *     PATCH/SEQ/PATTERN/SONG/TIMBRE) moved inside rebuildArpChord() itself
- *     rather than being duplicated at each call site — the local-key path
+ *     rather than being duplicated at each call site â€” the local-key path
  *     and the loop()-poll path had each grown a slightly different copy
  *     of this over time, which is exactly the kind of drift a single
  *     entry point is meant to prevent.
  *     v0.99932: MIDI clock's received BPM is now smoothed across beats,
  *     not applied raw. Averaging over one beat (24 clocks) already
  *     rejects jitter within it, but consecutive beats can still disagree
- *     slightly — and a real tempo knob's own physical wobble and small
+ *     slightly â€” and a real tempo knob's own physical wobble and small
  *     variance in exactly when this firmware gets to process a byte both
  *     show up the same way from the clock stream alone; there is no way
  *     to tell them apart. Blending reduces either without needing to
@@ -2412,21 +2416,21 @@
  *     first reading rather than easing up from the startup default.
  *     v0.99933 raises the smoothing from 0.3 to 0.6: it removed the wobble
  *     but made a deliberate tempo change feel slow to follow, since the
- *     same filter cannot tell a real change from beat-to-beat jitter — it
+ *     same filter cannot tell a real change from beat-to-beat jitter â€” it
  *     can only trade how much of each gets through. 0.6 leans toward
  *     following: a full jump settles in roughly 3-4 beats instead of 7-8,
  *     while still averaging enough to keep a held tempo from visibly
  *     wobbling.
  *     v0.99934 adds Swing to the PLAY screen's arp display, on its own
- *     line under tempo/rate rather than crowded onto that one — the note
+ *     line under tempo/rate rather than crowded onto that one â€” the note
  *     list above already says WHAT is playing and tempo/rate said how
  *     fast; Swing was the remaining piece SETTING > Arp shows that this
  *     screen did not. Resolved as base plus its IMU/CC offset, clamped to
  *     the same range the ARP timing itself uses, so the number shown is
  *     what is actually shaping the groove rather than just the menu's
- *     stored value — the same treatment tempo already got.
+ *     stored value â€” the same treatment tempo already got.
  *     v0.99935 corrects v0.99934, which assumed the row below tempo/rate
- *     was free. It was not — the Octave/Transpose status line (O:+0 T:+0)
+ *     was free. It was not â€” the Octave/Transpose status line (O:+0 T:+0)
  *     is drawn there unconditionally, arp running or not, and the two
  *     overlapped into unreadable garbage, visible in a photo of the
  *     actual screen. Swing now shares the tempo/rate line instead:
@@ -2442,7 +2446,7 @@
  *     tempo/rate line was on cramming it in. The note list is capped to
  *     two rows now rather than three, specifically to GUARANTEE that
  *     third row's space is free regardless of how many notes happen to
- *     be held — a large chord growing into it would only recreate the
+ *     be held â€” a large chord growing into it would only recreate the
  *     same collision that hit the Octave/Transpose line in v0.99934, just
  *     moved one row up. Swing gets that guaranteed row back to itself,
  *     and tempo/rate returns to the simpler single-line form.
@@ -2453,8 +2457,8 @@
  *     the tempo/rate and swing lines touching, and tempo/rate sitting
  *     noticeably right of every other row's left edge.
  *     The touching was a spacing bug carried through v0.99936 and
- *     v0.99937's edits: every other row in this box — the note list,
- *     O:+0/T:+0, P:off/H:off — is spaced 9px apart, but these two were
+ *     v0.99937's edits: every other row in this box â€” the note list,
+ *     O:+0/T:+0, P:off/H:off â€” is spaced 9px apart, but these two were
  *     only 6px apart, close enough for character descenders to visibly
  *     meet on the real screen even though nothing was technically out of
  *     the canvas. Moved to the same 9px cadence (local y=23, 32), which
@@ -2467,8 +2471,8 @@
  *     v0.9994 opens the UI/UX final-pass phase with two of the items
  *     raised there: an explicit "+" on additive IMU/CC offsets, and Tap
  *     Tempo.
- *     Nine displays showed a raw offset — ARP_TEMPO, ARP_SWING, PITCH_BEND,
- *     DETUNE, NOISE, SUB_LEVEL, RESONANCE, LFO_RATE, LFO_DEPTH — as a bare
+ *     Nine displays showed a raw offset â€” ARP_TEMPO, ARP_SWING, PITCH_BEND,
+ *     DETUNE, NOISE, SUB_LEVEL, RESONANCE, LFO_RATE, LFO_DEPTH â€” as a bare
  *     number with no sign for a positive value, exactly the confusion
  *     reported for ARP Tempo: "15" read as "playing at 15bpm" rather than
  *     "15 over whatever tempo is set." BEND_UP already carried an explicit
@@ -2476,12 +2480,12 @@
  *     imuSign() supplies "+" for a positive value and nothing otherwise,
  *     since the numeric formatting already contributes "-" on its own.
  *     Tap Tempo lives on Shift+Enter, tracked from updateOctaveAndVolume()
- *     — which already runs on every screen except Patch/Pattern/Timbre —
+ *     â€” which already runs on every screen except Patch/Pattern/Timbre â€”
  *     rather than being added to a menu, so it costs no key PLAY or SEQ
  *     had spare. It sets whichever tempo is actually in use, seqTempoBpm
  *     while SEQ plays and arpTempoBpm otherwise, matching how the two are
  *     already independent everywhere in this firmware. Consecutive taps
- *     blend into a running average rather than each replacing the last —
+ *     blend into a running average rather than each replacing the last â€”
  *     a human tapping a beat is never perfectly even, and averaging the
  *     last few intervals is what a hardware tap-tempo button does. A gap
  *     over two seconds starts a fresh average instead of blending against
@@ -2491,15 +2495,15 @@
  *     sounding like a stray bitcrush or phaser, on patches using neither.
  *     It was a real bug, not the sound a waveform change is expected to
  *     make.
- *     timbreMorph is a float POSITION inside morphChain[] — which slot of
- *     the chain to read the current waveform from — and morphChain[]
+ *     timbreMorph is a float POSITION inside morphChain[] â€” which slot of
+ *     the chain to read the current waveform from â€” and morphChain[]
  *     itself switches discretely to the target patch's chain at the very
  *     start of morphStart(), by design: there is no halfway between two
  *     different SETS of waveforms. But timbreMorph was left to interpolate
  *     continuously in morphApply(), starting from the OUTGOING patch's
  *     value. For as long as that interpolation took to catch up, the
  *     synth was reading a position meant for the old chain out of the
- *     chain that had already become the new one — an unrelated blend of
+ *     chain that had already become the new one â€” an unrelated blend of
  *     whatever waveforms happened to sit at that slot in the new set,
  *     which is what produced the harsh, unintended sound at the start of
  *     nearly every morph.
@@ -2513,17 +2517,17 @@
  *     v0.9995's instant snap removed something they liked: the waveform
  *     visibly changing over the course of a morph, not just jumping.
  *     Re-examining the mechanism showed the sweep itself was never the
- *     problem — getMorphedSample() already clamps every index it uses to
+ *     problem â€” getMorphedSample() already clamps every index it uses to
  *     morphChainLen, so nothing was ever misreading memory or a stale
  *     pointer. The actual fault was narrower: interpolation used to start
  *     from the OUTGOING patch's timbreMorph value, a position that
  *     belonged to a chain which had already stopped existing the instant
- *     morphChain[] switched — an arbitrary jump with no relationship to
+ *     morphChain[] switched â€” an arbitrary jump with no relationship to
  *     the new chain, not a sweep through it.
  *     The fix keeps the sweep and removes only that mismatch: it now
- *     starts from an END of the chain that is already active — whichever
+ *     starts from an END of the chain that is already active â€” whichever
  *     end sits farther from this patch's own timbreMorph target, for the
- *     longest and most audible sweep — and interpolates toward the
+ *     longest and most audible sweep â€” and interpolates toward the
  *     target in lockstep with morphApply()'s own t, over the whole
  *     morph's duration. Every frame of that sweep reads consecutive
  *     waveforms of the SAME currently-active set, so it is coherent audio
@@ -2539,33 +2543,33 @@
  *     "no fixed repro" description together pointed at the same
  *     underlying cause rather than two separate ones.
  *     morphChain[]/morphChainLen/morphTblA[]/morphTblB[] are shared
- *     between loop() (APP core) and audioTask (PRO core — a genuinely
+ *     between loop() (APP core) and audioTask (PRO core â€” a genuinely
  *     different physical core on this chip, not merely a different task),
  *     and nothing in this file had ever synchronised access to them.
  *     morphStart() rewrites all of them across several separate
  *     statements; audioTask's getMorphedSample() reads them on every
  *     sample, and separately calls refreshMorphTablePtrs() itself,
- *     unconditionally, once per buffer — meaning there were genuinely TWO
+ *     unconditionally, once per buffer â€” meaning there were genuinely TWO
  *     writers to morphTblA/morphTblB (audioTask's own routine refresh and
  *     whichever UI action just changed the chain), on two different
  *     cores, with no coordination. A read landing mid-update could pair a
  *     just-updated chainLen with pointer slots the array copy had not
- *     reached yet, or catch both writers mid-overlap — read as a stray
+ *     reached yet, or catch both writers mid-overlap â€” read as a stray
  *     waveform in the wrong position (heard as noise) or, if a pointer
  *     was caught still null, worse. No fixed reproduction is exactly what
  *     an unsynchronised cross-core race looks like from outside it.
  *     A single portMUX_TYPE spinlock (morphChainMux) now guards every
  *     site that touches this state: morphStart(), the Morph chain
  *     editor's live add/remove/swap, the slot-restore and tone-reset
- *     defaults, and refreshMorphTablePtrs() itself — which takes the lock
+ *     defaults, and refreshMorphTablePtrs() itself â€” which takes the lock
  *     internally, so every caller is protected automatically rather than
  *     each having to remember to. ESP32's portMUX spinlocks are
  *     re-entrant by the same core, so a caller that already holds the
  *     lock nests into refreshMorphTablePtrs()'s own lock safely.
  *     Cost is deliberately not uniform: refreshMorphTablePtrs()'s body is
  *     a handful of array-pointer copies, not real work, so locking every
- *     call to it — including the one every audio buffer makes
- *     unconditionally — is negligible next to the ~23ms it has to run in.
+ *     call to it â€” including the one every audio buffer makes
+ *     unconditionally â€” is negligible next to the ~23ms it has to run in.
  *     getMorphedSample()'s own hot per-sample lookup is NOT locked,
  *     deliberately: at up to 44100 calls/sec a spinlock there would cost
  *     real CPU for a case that essentially never needs it, so only its
@@ -2577,15 +2581,15 @@
  *     assignment, a larger change than this pass covers. Loading a patch
  *     while a note is actively sounding remains a known gap.
  *     v0.99944 responds to two reports. The morph silence got WORSE and
- *     now persists until a full power cycle — a materially different,
+ *     now persists until a full power cycle â€” a materially different,
  *     more serious symptom than before, and one this reads as consistent
  *     with a genuine hang rather than a transient glitch. Every
  *     portENTER_CRITICAL/portEXIT_CRITICAL pair from v0.99943 was checked
- *     by hand for an early return or break that could skip the exit —
+ *     by hand for an early return or break that could skip the exit â€”
  *     none found. Rather than guess a sixth time, audioTask now writes a
- *     timestamp every buffer (audioTaskHeartbeatUs), and loop() — on its
+ *     timestamp every buffer (audioTaskHeartbeatUs), and loop() â€” on its
  *     own independent clock, deliberately not relying on anything
- *     audioTask itself would need to be alive to trigger — logs plainly
+ *     audioTask itself would need to be alive to trigger â€” logs plainly
  *     if that timestamp stops advancing, and separately logs if the
  *     heartbeat is current but envPhase disagrees with what should be
  *     sounding. The next occurrence should say definitively whether
@@ -2602,8 +2606,8 @@
  *     stale count from an earlier session.
  *     v0.99945 fixes two things found once the silence and the residual
  *     noise were no longer in the way of noticing them clearly.
- *     Re-morphing to the same patch — or to a different patch that
- *     happens to share the same chain — still swept through every
+ *     Re-morphing to the same patch â€” or to a different patch that
+ *     happens to share the same chain â€” still swept through every
  *     waveform in it, which should have been an audible no-op. The
  *     "start from a far end of the chain" logic from v0.99942 ran
  *     unconditionally, with nothing checking whether the chain had
@@ -2612,26 +2616,26 @@
  *     against even if it had tried. The comparison now happens BEFORE
  *     that overwrite: when the incoming chain is byte-for-byte identical
  *     to the one already active, the sweep starts from wherever the
- *     sound already is instead of a chain end — which, for an unchanged
+ *     sound already is instead of a chain end â€” which, for an unchanged
  *     chain, means no audible change, exactly what re-selecting the same
  *     patch should do.
  *     Separately, the VCO screen's Timbre readout jumped straight to the
  *     morph's target the instant nothing was playing, and only revealed
- *     the true in-progress value once a key was pressed — seemingly
+ *     the true in-progress value once a key was pressed â€” seemingly
  *     backwards from what a display should do. The cause was older code,
  *     written to fix IMU tilt not reaching params.timbreMorph while idle,
  *     that snaps it straight to its target every buffer whenever
  *     envPhase is IDLE. That snap is exactly right for the IMU case it
  *     was written for, but the morph sweep now drives this same pair on
  *     its own independent timeline via morphApply(), deliberately
- *     regardless of note state — so the old snap fought it every single
+ *     regardless of note state â€” so the old snap fought it every single
  *     buffer while idle, and the display never had a chance to show
  *     anything but the final value until a note interrupted the snap by
  *     leaving IDLE. Gated on !morphActive now, so the snap only runs when
- *     nothing is actually mid-sweep — unaffected for its original IMU
+ *     nothing is actually mid-sweep â€” unaffected for its original IMU
  *     purpose, out of the way during a morph.
  *     v0.99946 finds the actual source of the phaser sound reported on
- *     re-morphing to the same patch — worst on Lead, Bass, Brass and
+ *     re-morphing to the same patch â€” worst on Lead, Bass, Brass and
  *     Pluck specifically, which was the clue: those four share nothing
  *     in their FX, but they DO all carry a large filter envelope depth,
  *     and that turned out to be exactly the variable that mattered.
@@ -2642,7 +2646,7 @@
  *     value directly into those shared fields, call
  *     updateFilterCoefficients() (which read them back out with no
  *     parameters of its own), then immediately restore the saved static
- *     value — a real window, however brief, during which the shared
+ *     value â€” a real window, however brief, during which the shared
  *     fields held an envelope-inflated value rather than the patch's true
  *     one. Landing in that window meant morphCapture() recorded the
  *     inflated value as the morph's starting cutoff; morphApply() then
@@ -2656,18 +2660,18 @@
  *     filterParams directly) for every other caller. The per-buffer
  *     modulation path passes its dynamic values straight through instead,
  *     and never touches filterParams.cutoffHz/resonanceQ at all any
- *     more — removing the race outright rather than narrowing it with a
+ *     more â€” removing the race outright rather than narrowing it with a
  *     lock, since there is nothing left to catch mid-update.
  *     v0.99947: the filter-cutoff race fix did not resolve the residual
  *     phaser on same-patch remorphing, and a new, RELIABLY reproducible
  *     silence appeared (Strings<->Pluck, both directions, preceded by
  *     several clicks). Neither audioTaskHeartbeatUs nor the envPhase/
  *     currentFreq mismatch check fired, ruling out both a hung audioTask
- *     and that specific envelope contradiction — the cause is something
+ *     and that specific envelope contradiction â€” the cause is something
  *     else the existing diagnostics do not cover.
  *     Two things worth separating on the phaser: same-patch morphing was
  *     never guaranteed to be silent to begin with. morphCapture() records
- *     whatever the LIVE sound is doing at that instant, offsets included —
+ *     whatever the LIVE sound is doing at that instant, offsets included â€”
  *     if IMU tilt, vibrato, or any other live modulation had the sound
  *     away from the patch's own stored baseline at the moment of the
  *     morph, resetting those offsets back to baseline (which any morph
@@ -2675,81 +2679,81 @@
  *     bug. Whether that explains what was heard depends on whether
  *     anything was actively modulating at the time.
  *     A second look for the same anti-pattern that caused the filter race
- *     — a shared field temporarily overwritten with a dynamic value, used,
- *     then restored — found nothing else matching it in the file.
+ *     â€” a shared field temporarily overwritten with a dynamic value, used,
+ *     then restored â€” found nothing else matching it in the file.
  *     For the reproducible silence, morphTick() now logs envPhase,
  *     envLevel, currentFreq, playingFreq, adsr.sustainLevel,
  *     filterEnvLevel and filterParams.cutoffHz every ~150ms while a morph
  *     is active, behind CPS_LOG_PATCH. Reproducible cases are exactly
- *     what this kind of logging is for — the next run should show what
+ *     what this kind of logging is for â€” the next run should show what
  *     state things are actually in when the clicks and the silence
  *     happen, rather than requiring another guess.
- *     v0.99948: it did not happen — v0.99947 stopped reproducing the
+ *     v0.99948: it did not happen â€” v0.99947 stopped reproducing the
  *     click/silence entirely. Not fixed, avoided: Serial.printf() is slow
  *     enough that calling it every 150ms shifted loop()'s timing just
  *     enough to dodge whatever narrow window causes this, which is itself
  *     useful confirmation that the cause is timing-sensitive rather than
- *     a plain logic error — a live-printing diagnostic cannot observe a
+ *     a plain logic error â€” a live-printing diagnostic cannot observe a
  *     race it is itself perturbing out of existence.
  *     Recording now goes into a small in-memory ring buffer
  *     (morphDiagLog[], a handful of array writes, no I/O) during the
  *     morph, with the whole captured sequence printed in one batch only
- *     after the morph finishes — real-time pressure is over by then, so
+ *     after the morph finishes â€” real-time pressure is over by then, so
  *     the dump cannot influence the window it is reporting on. Same
  *     fields as before (envPhase, envLevel, currentFreq, playingFreq,
  *     adsr.sustainLevel, filterEnvLevel, filterParams.cutoffHz), just
  *     delivered after the fact instead of live.
  *     v0.99949: a same-patch Lead remorph, held via Hold the whole time,
- *     produced exactly the "murky/gurgling" sound reported — and the log
+ *     produced exactly the "murky/gurgling" sound reported â€” and the log
  *     shows why it looked odd. envLevel and filterEnvLevel both rose well
  *     above their sustain levels (0.75 and roughly 0.5) for a stretch
  *     around 300-1000ms into the morph before settling back down, with
  *     envPhase briefly reporting DECAY (2) in the middle of what should
- *     have been an unbroken SUSTAIN — there is no path from SUSTAIN back
+ *     have been an unbroken SUSTAIN â€” there is no path from SUSTAIN back
  *     to DECAY in advanceEnvelope() without an ATTACK in between, so
  *     something retriggered the envelope mid-morph despite Hold never
  *     changing.
  *     Neither morphStart() nor morphApply() touches envPhase or
- *     currentFreq directly — checked by hand across both functions — so
+ *     currentFreq directly â€” checked by hand across both functions â€” so
  *     the actual cause is not yet found. What the log COULD NOT show:
  *     filterEnvPhase is a separate state machine from envPhase
  *     (advanceEnvelope() runs two independent switch blocks for them),
- *     and the diagnostic had only ever recorded the amp one — a
+ *     and the diagnostic had only ever recorded the amp one â€” a
  *     filterEnvLevel excursion could be the filter envelope retriggering
  *     entirely on its own, invisible until logged directly. Both
  *     filterEnvPhase and noteHeld are recorded now, which should show
  *     whether Hold's own state ever moves (ruling a real key-state change
  *     in or out) and whether the two envelopes retrigger together or
- *     independently — the next capture should narrow this considerably.
+ *     independently â€” the next capture should narrow this considerably.
  *     v0.99950: three consistent captures (filterEnvPhase/noteHeld now
- *     included) all show the same shape — noteHeld staying 1 throughout,
+ *     included) all show the same shape â€” noteHeld staying 1 throughout,
  *     yet both envelopes retrigger at almost exactly the same relative
- *     point in the morph every time. Every legitimate retrigger source —
- *     ARP, Theremin, MIDI, SEQ — was confirmed off/disconnected for these
+ *     point in the morph every time. Every legitimate retrigger source â€”
+ *     ARP, Theremin, MIDI, SEQ â€” was confirmed off/disconnected for these
  *     captures, ruling out five of the six known trigger sites. A broader
  *     search for any envPhase/filterEnvPhase=ATTACK assignment, not just
- *     the exact pattern already known, found no seventh site — the
+ *     the exact pattern already known, found no seventh site â€” the
  *     remaining candidate is loop()'s own local-keyboard handler, the one
  *     path that does not require any of those four systems.
  *     That handler only retriggers when resolveFreqFromKeys() reports a
  *     held note key (nf>0). The owner isn't touching a note key during
- *     this test — they are pressing Shift+<number> to reselect the same
+ *     this test â€” they are pressing Shift+<number> to reselect the same
  *     Morph slot, which is a keyChanged event this handler runs on too.
  *     This keyboard's Shift handling has produced exactly this class of
- *     quirk before elsewhere in this file — a transitional scan catching
- *     an unshifted character before Shift's effect is reflected — so a
+ *     quirk before elsewhere in this file â€” a transitional scan catching
+ *     an unshifted character before Shift's effect is reflected â€” so a
  *     plausible mechanism exists for nf to read briefly nonzero during
  *     that specific keypress.
  *     Rather than fix a guess, the retrigger site itself now logs nf and
  *     the raw key buffer at the exact moment it fires, so the next
  *     capture shows directly whether this is what is happening, and
  *     which character is responsible if so.
- *     v0.99951: the log is conclusive — every capture, three times, read
+ *     v0.99951: the log is conclusive â€” every capture, three times, read
  *     "shift=0 word=\"3\"" at the exact instant of retrigger. Pressing
  *     Shift+3 to reselect Morph slot 3 (Lead) genuinely produces one scan
  *     where the keyboard driver reports Shift not yet active alongside
- *     the bare digit — the two physical edges do not land in perfectly
- *     the same instant — and "3" happens to be a valid unshifted note key
+ *     the bare digit â€” the two physical edges do not land in perfectly
+ *     the same instant â€” and "3" happens to be a valid unshifted note key
  *     on this layout (E4, 329.6Hz, matching every capture exactly), so
  *     that transitional scan was genuinely indistinguishable from someone
  *     pressing it. This was never really about Morphing at all; any
@@ -2757,21 +2761,21 @@
  *     the same one-scan artifact, and Morph slot selection was simply the
  *     first place it got tested enough to notice.
  *     Fixed by debouncing the RETRIGGER decision specifically, not
- *     resolveFreqFromKeys()'s result itself — nf still drives
+ *     resolveFreqFromKeys()'s result itself â€” nf still drives
  *     currentFreq, pitch tracking and note-off exactly as before, so
  *     releasing a key stays immediate. Only the ATTACK-phase retrigger
  *     now requires the SAME nf value on two consecutive keyChanged reads
  *     before it is allowed to fire. A one-scan blip fails that
  *     immediately (the very next read never matches, since it was never a
  *     real key). A genuine press, physically held for far longer than a
- *     couple of scan cycles, satisfies it on the next read — an
+ *     couple of scan cycles, satisfies it on the next read â€” an
  *     imperceptible added latency next to how this instrument is
  *     actually played.
  *     v0.99952 reverts v0.99951's fix, which was wrong in a way severe
  *     enough to silence the instrument from boot onward, and replaces it
  *     with one scoped to what the race actually requires.
- *     keyChanged is edge-triggered — it fires once when the pressed-key
- *     SET changes, not repeatedly while a key is simply held — so
+ *     keyChanged is edge-triggered â€” it fires once when the pressed-key
+ *     SET changes, not repeatedly while a key is simply held â€” so
  *     requiring a SECOND keyChanged carrying the same nf had no natural
  *     way to ever arrive for an ordinary single press: there is no
  *     further state change to report while a finger just sits on one
@@ -2781,21 +2785,21 @@
  *     on a second event, and only when it is actually needed: Row 1 (the
  *     number row, ROW1_KEYS) is what doubles as Shift+1..0 for Morph slot
  *     select, so only a note resolved from a Row-1 character gets a
- *     short delay and a direct re-read of Shift's own state — Row 2
+ *     short delay and a direct re-read of Shift's own state â€” Row 2
  *     (letters) has no such combo and is never delayed at all. If Shift
  *     reads true once the race has had a moment to settle, this was a
  *     Shift+digit combo, not a note, and the retrigger is skipped. A
  *     genuine Row-1 note press, unaccompanied by Shift, pays a few
  *     milliseconds and proceeds exactly as before.
- *     v0.99953: the retrigger fix is confirmed working — three clean
- *     captures, envPhase never leaving SUSTAIN — and yet the reported
+ *     v0.99953: the retrigger fix is confirmed working â€” three clean
+ *     captures, envPhase never leaving SUSTAIN â€” and yet the reported
  *     "blurry, reverb-like, clears up right as the morph finishes"
  *     character persisted across those same clean runs. That means the
  *     retrigger was never actually causing this; it only co-occurred
  *     with a louder, more dramatic symptom that happened to mask it.
- *     Analog Drift was also ruled out — the effect persists with it off.
- *     Code review of reverb, chorus and LFO — the obvious candidates for
- *     a blur/wash character — found none of the same live-overwrite
+ *     Analog Drift was also ruled out â€” the effect persists with it off.
+ *     Code review of reverb, chorus and LFO â€” the obvious candidates for
+ *     a blur/wash character â€” found none of the same live-overwrite
  *     anti-pattern the filter had; morphCapture()'s wholesale `d.p=params`
  *     copy reads them safely, and nothing writes back into them the way
  *     the old filter code did. Rather than guess further, reverbMix,
@@ -2808,78 +2812,78 @@
  *     on every boot immediately after v0.99953, no Cap attached, on both
  *     boot paths, with nothing else changed. setup() (where SD mounts)
  *     completes entirely before loop() is first called, so morphTick()'s
- *     own code could not have run yet at the point of failure — the
+ *     own code could not have run yet at the point of failure â€” the
  *     connection has to be a memory-layout side effect from the array
  *     growing large enough to expose an out-of-bounds write elsewhere
  *     that happens to land on whatever the VFS layer needs, not a direct
  *     causal one. The exact culprit elsewhere is not found; reverting the
  *     one thing that changed is the safe, testable move while it isn't.
  *     The reverb/chorus/LFO question this was investigating remains open
- *     — it will need a different, smaller way to gather the same data
+ *     â€” it will need a different, smaller way to gather the same data
  *     next time, not a repeat of what just broke SD.
- *     v0.99955 fixes a genuine crash — Guru Meditation, StoreProhibited,
- *     a write near address 0 — that followed a burst of the v0.99952
+ *     v0.99955 fixes a genuine crash â€” Guru Meditation, StoreProhibited,
+ *     a write near address 0 â€” that followed a burst of the v0.99952
  *     Row-1 retrigger recheck firing in quick succession, and struck on
  *     an unrelated Tab press shortly after. The most likely mechanism:
  *     delay(5) yields to the FreeRTOS scheduler, and calling it
- *     synchronously inside loop()'s keyChanged handling — on every single
- *     Row-1 note-on — opened a scheduling window that let some other,
+ *     synchronously inside loop()'s keyChanged handling â€” on every single
+ *     Row-1 note-on â€” opened a scheduling window that let some other,
  *     previously-latent race actually fire, rather than the delay itself
  *     being the direct fault.
  *     No delay() call exists anywhere in this replacement. A Row-1
  *     retrigger is now deferred rather than decided on the spot: the note
  *     is stashed in pendingRow1Nf/pendingRow1MidiActive/pendingRow1SetMs,
- *     and a separate check — outside the keyChanged gate, reached on
- *     every ordinary loop() pass regardless of further key events —
+ *     and a separate check â€” outside the keyChanged gate, reached on
+ *     every ordinary loop() pass regardless of further key events â€”
  *     finalises it once 5ms have genuinely elapsed, with a fresh
  *     keysState() read at that point. loop() runs many times within 5ms
  *     on its own, so nothing needs to wait for anything.
  *     v0.99956: the crash recurred on v0.99955 too, with the identical
- *     EXCVADDR=0x00000004 and the same backtrace shape, and — critically
- *     — the owner confirmed it was NOT tied to any number-key activity
+ *     EXCVADDR=0x00000004 and the same backtrace shape, and â€” critically
+ *     â€” the owner confirmed it was NOT tied to any number-key activity
  *     this time. That rules out the delay()/scheduling theory v0.99955
  *     was built on: this is a separate, pre-existing bug that happens to
  *     manifest on a Tab press, unrelated to the Row-1 retrigger work.
  *     Without the actual ELF and symbol table, this file's own analysis
  *     cannot decode the backtrace addresses to function names. Tab's own
  *     handler is a large, sprawling switch covering every screen, so a
- *     diagnostic print right where Tab starts being processed — logging
+ *     diagnostic print right where Tab starts being processed â€” logging
  *     appMode, shift, morphActive, morphDiagCount and currentFreq before
- *     any of that switch's branches can run — should at minimum narrow
+ *     any of that switch's branches can run â€” should at minimum narrow
  *     which screen/state combination is responsible the next time this
  *     is reproduced, rather than guessing among many candidate branches.
- *     v0.99957: the diagnostic worked immediately — "[tab] appMode=0
+ *     v0.99957: the diagnostic worked immediately â€” "[tab] appMode=0
  *     ..." printed successfully (confirming Tab's handler itself runs
  *     fine, right at its very top) and the crash followed regardless,
  *     with no number-key activity, on a totally fresh boot. G0 (SEQ)
  *     crashed identically, with the same EXCVADDR=0x00000004, without
- *     ever reaching this diagnostic at all — meaning the fault is not
+ *     ever reaching this diagnostic at all â€” meaning the fault is not
  *     inside Tab's own switch statement, but somewhere both paths funnel
  *     into afterward.
- *     That somewhere turned out to be `delay(5);return;` — a longstanding
+ *     That somewhere turned out to be `delay(5);return;` â€” a longstanding
  *     pattern already present at the end of every non-PLAY screen's
  *     branch (VCO, VCF, VCA, LFO, FX, SETTINGS, CATEGORY), not something
  *     added this session. It is the one thing every screen Tab or G0 can
  *     lead to has in common. delay() yields to the FreeRTOS scheduler,
- *     and something added earlier this session — most plausibly the
- *     morphChain[]/filterParams locking work — most likely introduced a
+ *     and something added earlier this session â€” most plausibly the
+ *     morphChain[]/filterParams locking work â€” most likely introduced a
  *     race that only manifests when a yield lands in the wrong window;
  *     this delay was simply the first place reliable enough to hit it,
  *     the same mechanism already confirmed for the earlier Row-1
  *     retrigger crash.
  *     Removed from all twelve matching sites, plus the equivalent one at
- *     the very end of loop() for the PLAY-screen fallthrough — PLAY has
+ *     the very end of loop() for the PLAY-screen fallthrough â€” PLAY has
  *     not shown this crash, but that is not proof it is immune to the
  *     same underlying race. The actual per-screen redraw throttling
  *     (MIN_REDRAW_MS, canForceRedraw, the 100ms checks) is untouched;
  *     only the artificial per-iteration pause is gone. The race itself
- *     remains unidentified — this removes the yield point these paths
+ *     remains unidentified â€” this removes the yield point these paths
  *     shared, not the root cause.
  *     v0.99958 fixes a genuine silence bug found while chasing the
  *     "juwa-juwa" texture: a log showed currentFreq becoming nonzero
  *     (440.0, then 415.3) while envPhase stayed IDLE the whole time, with
  *     the v0.99944 mismatch diagnostic confirming it directly. The cause
- *     is v0.99955's redesign — a single pending-retrigger slot that a
+ *     is v0.99955's redesign â€” a single pending-retrigger slot that a
  *     newer Row-1 key press can overwrite before an older one's 5ms
  *     window finalises, silently dropping the older retrigger. This
  *     surfaced during rapid Morph-slot A/B testing (repeatedly pressing
@@ -2896,33 +2900,33 @@
  *     the UI/UX final-check phase's own backlog. Three real, working
  *     shortcuts had no mention anywhere: Morph slot select (Shift+1..0),
  *     Tap Tempo (Shift+Enter, added v0.9994), and holding G0 for SONG
- *     mode — a player would have no way to discover any of these except
+ *     mode â€” a player would have no way to discover any of these except
  *     by reading the firmware itself. PLAY's HELP is re-laid-out to fit
  *     all three within its existing 10-line budget, trading the
  *     redundant "hold H" half of "H/S+H:Help hold/latch" (self-evident
  *     from already being on this screen) for the room. SEQ's HELP gains
- *     the Tap Tempo mention it was missing too — it works there as well
- *     — trading the explicit "G0:PLAY" mention, the same key that got
+ *     the Tap Tempo mention it was missing too â€” it works there as well
+ *     â€” trading the explicit "G0:PLAY" mention, the same key that got
  *     there in the first place and the natural inverse of the Space/G0
  *     toggle already documented. SONG's HELP is unchanged: Tap Tempo was
  *     built for PLAY and SEQ specifically, not SONG's own playback.
  *     v0.99963: Portamento and Arp (on/off, type, Tempo/Swing/Rate) are
- *     no longer part of a patch at all, on request — grouped with Bend
+ *     no longer part of a patch at all, on request â€” grouped with Bend
  *     as performance/operational settings the player controls directly,
  *     not something a patch should carry or overwrite on load. Save and
  *     load both gate every one of these keys on savingPatch/loadingPatch,
  *     matching the existing pattern already used for UI theme, MIDI CC
  *     assignments, and everything else this mechanism was built for.
  *     Randomize's own additions of these from a few versions ago are
- *     withdrawn to match — it randomizes a PATCH, and these are not part
+ *     withdrawn to match â€” it randomizes a PATCH, and these are not part
  *     of one any more.
  *     Separately: PLAY's HELP now shows IMU X/Y's live on/off state
- *     inline on the existing "C:Porta A:IMU-X S:IMU-Y" line — asked for
+ *     inline on the existing "C:Porta A:IMU-X S:IMU-Y" line â€” asked for
  *     right after the Latch/Arp reorder, but the box has no spare row, so
  *     this replaces the static line rather than adding one.
  *     v0.99964 corrects that line and gives it proper room: A/S is IMU
  *     axis HOLD (freeze the current value), Shift+A/Shift+S is the axis
- *     ENABLE toggle — two different actions the single line conflated,
+ *     ENABLE toggle â€” two different actions the single line conflated,
  *     labelling A/S as if they controlled on/off. The owner checked the
  *     actual hardware and found real spare space below the box (13+99=112
  *     against a 135px display), so rather than compress both meanings
@@ -2936,63 +2940,63 @@
  *     both still fit comfortably inside it.
  *     v0.99965: two follow-ups on the same HELP work. The shared box
  *     stayed at 117 for every screen after growing to fit PLAY's new IMU
- *     row, leaving SEQ and SONG — whose content still ends at y=98 — with
+ *     row, leaving SEQ and SONG â€” whose content still ends at y=98 â€” with
  *     a visible empty gap at the bottom. The box height is now chosen per
  *     screen: 99 for SEQ/SONG (their original size, still exactly enough),
  *     117 for PLAY, which is the only one that needed the extra room.
  *     Separately, SONG's HELP only supported holding H, not the Shift+H
- *     latch PLAY and SEQ both have — asked for to match them. Added the
+ *     latch PLAY and SEQ both have â€” asked for to match them. Added the
  *     same detection (Shift+H vs plain h) and toggle SONG's own key
  *     handler was missing, reusing the same helpLatched/
- *     prevHelpLatchPressed globals PLAY/SEQ already use — a latch set on
+ *     prevHelpLatchPressed globals PLAY/SEQ already use â€” a latch set on
  *     one screen now carries over to any of the three, which is the
  *     unified behaviour actually being asked for rather than three
  *     independent latches. SONG's HELP text gained a "Sh+H:Latch" mention
  *     to match.
  *     v0.99966: two follow-ups after checking on real hardware.
  *     PLAY's box still had about a line of slack, so its height is
- *     tightened 117->109 — 13+109=122, content ending at 116, the same
+ *     tightened 117->109 â€” 13+109=122, content ending at 116, the same
  *     ~6px bottom margin SEQ/SONG already have at their own 99.
  *     Separately: switching modes while H was held or latched (PLAY to
  *     SEQ, specifically going from the taller box to a shorter one) left
  *     the old box's bottom strip un-erased, visible underneath the new,
- *     shorter one — a real glitch introduced by v0.99965's per-mode
+ *     shorter one â€” a real glitch introduced by v0.99965's per-mode
  *     sizing, since the two heights no longer matched, so the same
  *     region no longer got fully overwritten every draw. Fixed by always
  *     clearing the MAXIMUM footprint (109, PLAY's own height) to black
  *     first, unconditionally, before drawing the mode-appropriate
- *     smaller bordered box on top — the tight-to-content look for
+ *     smaller bordered box on top â€” the tight-to-content look for
  *     SEQ/SONG stays, but nothing from a taller previous frame can show
  *     through any more.
  *     Also confirmed as intentional, not a bug: Help only exists on
  *     PLAY/SEQ/SONG. Tab-ing to a screen without it (VCO, SETTINGS,
- *     etc.) while H is held just shows nothing for it there — those
- *     screens never call drawHelpOverlay() at all — and it reappears on
+ *     etc.) while H is held just shows nothing for it there â€” those
+ *     screens never call drawHelpOverlay() at all â€” and it reappears on
  *     returning to a screen that does.
  *     v0.99967: ARP/SEQ/SONG's Tempo and Swing all moved 5-unit steps to
- *     1-unit, on request — timing controls, too coarse to dial in
+ *     1-unit, on request â€” timing controls, too coarse to dial in
  *     precisely at 5 per tap. A bare 1-unit step makes a large change
  *     tedious on its own, so all three gained hold-to-repeat to cover
  *     that: ARP's, reached through the shared CATEGORY settings dispatch,
  *     now checks onIncrement!=onDecrement to tell a genuine two-direction
  *     value from a toggle (a toggle's shared single function is never
- *     unequal to itself) — repeating the former the same way VCF/VCA/
+ *     unequal to itself) â€” repeating the former the same way VCF/VCA/
  *     LFO/FX already do, while leaving toggles (X Invert, X Curve, ...)
  *     exactly as edge-triggered as the comment there already explained
  *     they need to stay. SEQ's and SONG's live in their own separate
  *     handlers, not this shared dispatch, so each got the same
  *     menuKeyFire() treatment directly instead. All three reuse the same
  *     menuIncHeldMs/menuDecHeldMs globals CATEGORY's own value-editing
- *     already shares across VCF/VCA/LFO/FX — safe here too, since
+ *     already shares across VCF/VCA/LFO/FX â€” safe here too, since
  *     SETTINGS, SEQ and SONG are never the active screen simultaneously.
  *     v0.99968 fixes two things found testing v0.99967.
- *     SEQ's and SONG's Tempo/Swing did not actually repeat while held —
+ *     SEQ's and SONG's Tempo/Swing did not actually repeat while held â€”
  *     the reused menuIncHeldMs/menuDecHeldMs were the WRONG pair. Those
  *     track '/' and ',' (updateMenuNavigation()'s own mI/mDe), not the
  *     ';'/'.' that SEQ's vInc/vDec and SONG's left/right actually are.
  *     updateMenuNavigation() runs unconditionally every frame regardless
- *     of appMode and clears menuIncHeldMs whenever '/' is not down —
- *     which, while holding ';' for SEQ or SONG's Tempo, is always — so it
+ *     of appMode and clears menuIncHeldMs whenever '/' is not down â€”
+ *     which, while holding ';' for SEQ or SONG's Tempo, is always â€” so it
  *     zeroed the repeat timer out from under this on literally the next
  *     frame: the initial press fired (menuKeyFire's own !prev branch),
  *     nothing after did, matching exactly what was reported. Repaired by
@@ -3001,36 +3005,36 @@
  *     Separately, Volume gained the same step-5%->1% and hold-to-repeat
  *     treatment as Tempo/Swing, on request. keyVolume's 'l'/'k' handling
  *     used to live inside updateOctaveAndVolume(), which only runs
- *     inside loop()'s keyChanged gate — the same reason SEQ/SONG's
+ *     inside loop()'s keyChanged gate â€” the same reason SEQ/SONG's
  *     Tempo needed extracting in the first place, since a function only
  *     invoked when the key SET changes never runs again while a key is
  *     simply held steady. Pulled out into its own updateVolumeRepeat(),
  *     called unconditionally every loop() pass; the rest of
  *     updateOctaveAndVolume() is untouched. 'k'/'l' get their own
  *     dedicated volUpHeldMs/volDownHeldMs rather than reusing anything
- *     from CATEGORY's set — deliberately, to not repeat the exact mistake
+ *     from CATEGORY's set â€” deliberately, to not repeat the exact mistake
  *     just found and fixed above.
  *     v0.99969: SEQ's per-step Velocity gets the same step 5->1 and
- *     hold-to-repeat treatment, on request — it uses the same ';'/'.'
+ *     hold-to-repeat treatment, on request â€” it uses the same ';'/'.'
  *     keys (vInc/vDec) as the Tempo/Swing case in this same function, so
  *     the same menuUpHeldMs/menuDownHeldMs pairing applies here too.
  *     v0.9997 responds to a serious new report: total input lockup after
  *     rapidly re-morphing (redirecting to a new target before the
- *     previous one finished) while ARP was playing — ARP would not stop,
+ *     previous one finished) while ARP was playing â€” ARP would not stop,
  *     Latch would not release, no key did anything, yet audioTask kept
  *     logging normally throughout and afterward. That last part matters:
  *     it means audioTask itself was never the stuck one, and the hang has
- *     to be in loop() — which, being the thing that is stuck, has no way
+ *     to be in loop() â€” which, being the thing that is stuck, has no way
  *     to report its own hang from inside it.
  *     A mirror of the existing audioTaskHeartbeatUs is added in the
  *     other direction: loopHeartbeatMs, set at the very top of every
  *     loop() pass (before anything that could hang, so a hang partway
  *     through still leaves proof loop() reached that point), checked
- *     from audioTask — genuinely guaranteed to keep running independently
- *     even if loop() is stuck — inside diagRecordBuffer(), the same place
+ *     from audioTask â€” genuinely guaranteed to keep running independently
+ *     even if loop() is stuck â€” inside diagRecordBuffer(), the same place
  *     that already tracks its own per-second timing window.
  *     Separately, the log from the report showed morphDiagLog capped at
- *     exactly 48 samples — MORPH_DIAG_CAP — confirming a gap noted but
+ *     exactly 48 samples â€” MORPH_DIAG_CAP â€” confirming a gap noted but
  *     left unaddressed when that diagnostic was built: redirecting to a
  *     new target before a previous morph finished never reset
  *     morphDiagCount, so repeated redirects (exactly what was being done
@@ -3038,36 +3042,36 @@
  *     them until it filled and stopped recording anything further.
  *     morphStart() now resets the counter on every call, including
  *     redirects, so each attempt gets its own clean window.
- *     Neither change is confirmed as the actual cause of the lockup — the
+ *     Neither change is confirmed as the actual cause of the lockup â€” the
  *     heartbeat exists to find out what is, on the next occurrence,
  *     rather than guessing further from one log.
  *     v0.99971 finds an actual cause, from a much more useful report: no
  *     loop() heartbeat failure this time (confirming loop() itself was
- *     never stuck — the screen kept updating, IMU indicator included),
+ *     never stuck â€” the screen kept updating, IMU indicator included),
  *     but one specific note stuck sounding continuously, displayed the
  *     same way a Latched note is even with Latch off, ARP on, no morph
  *     involved this time at all.
  *     Traced to the v0.99958 self-healing safety net running unqualified.
  *     ARP's own triggerArpStep() sets currentFreq and envPhase=ATTACK
- *     together atomically, so there was never a gap there — but a gate
+ *     together atomically, so there was never a gap there â€” but a gate
  *     shorter than 100% deliberately leaves a silent gap BETWEEN steps:
  *     envPhase legitimately reaches IDLE via its own release while
  *     currentFreq still holds the note that just finished, since nothing
  *     zeroes it for that gap on purpose. The safety net had no way to
  *     tell that gap apart from a genuine stuck note, so it re-attacked
- *     the stale frequency every single loop() pass — fighting ARP's own
+ *     the stale frequency every single loop() pass â€” fighting ARP's own
  *     timing outright and getting stuck on whichever note happened to be
  *     playing the moment it first fired.
- *     Now excluded whenever arpEnabled or seqPlaying — both already have
+ *     Now excluded whenever arpEnabled or seqPlaying â€” both already have
  *     complete, correct control over currentFreq/envPhase on their own,
  *     including deliberate silent gaps this check was never meant to
  *     compete with. It was built for one specific case that has nothing
  *     to do with either: ordinary keyboard play's Row-1 pending-retrigger
  *     slot getting overwritten by a newer press before its 5ms window
- *     finalises. That case is untouched — this narrows where the net
+ *     finalises. That case is untouched â€” this narrows where the net
  *     applies, not what it catches.
  *     v0.99972 responds to a follow-up report on v0.99971: a different
- *     symptom this time — total silence rather than a stuck note, "---"
+ *     symptom this time â€” total silence rather than a stuck note, "---"
  *     shown for the current note, screen still updating (no loop()
  *     heartbeat failure), ARP on. Possible that the v0.99971 narrowing
  *     unmasked a separate, pre-existing ARP issue that the old
@@ -3077,10 +3081,10 @@
  *     diagnostic logs its own view once a second while arpEnabled:
  *     arpHeldCount, currentFreq, envPhase, appMode, and the raw keyboard
  *     word. Deliberately no array this time, learning from the earlier
- *     SD-mount regression a growing diagnostic array caused — this is a
+ *     SD-mount regression a growing diagnostic array caused â€” this is a
  *     single periodic print with no state beyond a timestamp. If
  *     arpHeldCount reads 0 while real keys are visibly in the logged
- *     word, rebuildArpChord() is not seeing them — a different bug from
+ *     word, rebuildArpChord() is not seeing them â€” a different bug from
  *     anything fixed so far. If arpHeldCount is nonzero but nothing
  *     sounds, the fault is further down in updateArpTiming() or
  *     triggerArpStep() instead. Either way, the next occurrence's log
@@ -3088,28 +3092,28 @@
  *     v0.99973 corrects a gap in that same diagnostic, found from its own
  *     first capture: envPhase, currentFreq, heldCount and the raw
  *     keyboard word all stayed EXACTLY identical across four consecutive
- *     one-second samples — sound frozen mid-decay rather than silent this
- *     time — which is consistent with updateArpTiming() simply never
+ *     one-second samples â€” sound frozen mid-decay rather than silent this
+ *     time â€” which is consistent with updateArpTiming() simply never
  *     running at all. But the diagnostic only checked arpEnabled, while
  *     the real call site requires the stricter
- *     !seqPlaying&&notesAllowed&&arpEnabled — so it kept firing and
+ *     !seqPlaying&&notesAllowed&&arpEnabled â€” so it kept firing and
  *     looking normal regardless of whether that actual condition was
  *     being met, hiding exactly the thing that would explain a freeze.
  *     seqPlaying and notesAllowed are now logged alongside everything
  *     else. If seqPlaying reads stuck true despite the player never
- *     intentionally using SEQ — plausible from the same class of
+ *     intentionally using SEQ â€” plausible from the same class of
  *     keyboard-scan quirk already found and fixed for Shift+digit,
- *     Space being the key that toggles it — that would fully explain
+ *     Space being the key that toggles it â€” that would fully explain
  *     updateArpTiming() going silent while every other loop() pass
  *     continued normally.
- *     v0.99974: the seqPlaying theory was wrong — the follow-up log read
+ *     v0.99974: the seqPlaying theory was wrong â€” the follow-up log read
  *     seqPlaying=0, notesAllowed=1 throughout, meaning updateArpTiming()
  *     really was being called every frame, yet heldCount/cur/envPhase/
  *     the raw keyboard word all stayed frozen identically for 9+ seconds
  *     regardless. The stall is inside updateArpTiming() itself.
  *     ARP_RATES[arpRateIndex] is read with no bounds check, and a garbage
  *     .mult from an out-of-range index would explain an effectively
- *     infinite step interval — but every one of arpRateIndex's four write
+ *     infinite step interval â€” but every one of arpRateIndex's four write
  *     sites turned out to already be safely guarded except
  *     restoreGlobals()'s, which is now bounds-checked too (defensive;
  *     that restore only runs once at boot, unlikely to be this bug's
@@ -3123,18 +3127,18 @@
  *     elapsed-time condition ever reads true again once stuck.
  *     v0.99975 finds the actual root cause, and it is not in this file.
  *     The follow-up log showed stepMs/bpm/arpRateIndex all perfectly
- *     healthy throughout — updateArpTiming()'s own math was never the
+ *     healthy throughout â€” updateArpTiming()'s own math was never the
  *     problem. What stayed frozen was the raw keyboard word itself: the
  *     same single key, reported held, for over a minute straight, with
  *     the player confirming NOTHING responded to any key during that
  *     window (not just the one that looked stuck). The Cardputer ADV
  *     reads its keyboard through a TCA8418 I2C keypad controller (a
  *     separate chip from the BMI270 IMU, which is why the IMU indicator
- *     kept moving throughout — a different device on the bus, unaffected).
+ *     kept moving throughout â€” a different device on the bus, unaffected).
  *     Independent reports from engineers working with the same TCA8418
  *     describe exactly this: I2C communication to the chip can go
  *     completely dead, most reliably triggered by fast key presses,
- *     recoverable only by pulling the chip's own RESET line — something
+ *     recoverable only by pulling the chip's own RESET line â€” something
  *     M5Cardputer's library does not expose a way to do from software.
  *     This is a documented hardware/library-level quirk of the chip
  *     itself, not a C.P.S. bug, and not something fixable by editing
@@ -3143,87 +3147,87 @@
  *     is the best available mitigation: if the reported keyboard state is
  *     non-empty and does not change at all for 30 real seconds, the board
  *     restarts itself. An idle keyboard (nothing held) is explicitly
- *     exempt — that is normal, not stuck. What this cannot distinguish is
+ *     exempt â€” that is normal, not stuck. What this cannot distinguish is
  *     a genuinely frozen TCA8418 from a player deliberately holding one
  *     long, unchanging note or chord for the same span of time; those
  *     look identical from software. The threshold is chosen to make that
- *     collision rare, not impossible — see the accompanying README/manual
+ *     collision rare, not impossible â€” see the accompanying README/manual
  *     note this pairs with.
- *     v0.99976: the watchdog never fired — a 20+ second log window showed
+ *     v0.99976: the watchdog never fired â€” a 20+ second log window showed
  *     the same frozen "3i" throughout (heldCount and the arp itself
  *     confirming the two keys never actually changed) and no restart. The
  *     suspected cause: s.word's character ORDER is not guaranteed stable
- *     between reads of the exact same held key set — a check reading "3i"
+ *     between reads of the exact same held key set â€” a check reading "3i"
  *     one second and "i3" the next would make a raw strcmp see those as
  *     different, resetting the timer every single time and never
  *     accumulating enough consecutive unchanged time to reach 30 seconds.
  *     Both buffers are now sorted before comparing, so the check depends
  *     only on WHICH keys are held, not what order the library happened to
- *     report them in. Confirmation logging added alongside it — one line
+ *     report them in. Confirmation logging added alongside it â€” one line
  *     when a change is detected, one every 5s while unchanged, showing
- *     the running duration against the threshold — so the next occurrence
+ *     the running duration against the threshold â€” so the next occurrence
  *     shows directly whether this was the actual cause rather than
  *     assuming the sort fixed it blind.
  *     v0.99977 is the UI/UX phase's diagnostic-log re-audit. Retired every
  *     investigation-specific diagnostic whose bug is now confirmed fixed
- *     — each had gone from useful to just serial-log noise for ordinary
+ *     â€” each had gone from useful to just serial-log noise for ordinary
  *     use: [tab] (the Tab-crash investigation, fixed v0.99957), [arp] and
- *     [arpTiming] (the TCA8418 freeze investigation — root cause found,
+ *     [arpTiming] (the TCA8418 freeze investigation â€” root cause found,
  *     not in this file; the watchdog is the mitigation, not these), and
- *     [retrigger] (the Shift+digit Row-1 race, fixed v0.99952 — this one
+ *     [retrigger] (the Shift+digit Row-1 race, fixed v0.99952 â€” this one
  *     fired on nearly every note played, Row 1 being the main octave).
  *     Also retired: [bitcrush], an even older diagnostic (v0.9902) whose
  *     own comment said to remove it once the cause was known, and
  *     bitcrush has since been exercised extensively with no further
  *     reports. The keyboard watchdog's per-change/every-5s confirmation
  *     logging is retired too, now that a real recovery has been observed
- *     firing correctly — left running it would print on nearly every
+ *     firing correctly â€” left running it would print on nearly every
  *     keypress and every 5s of any held note; only the actual restart
  *     notice remains, unconditional, genuinely rare and worth knowing
  *     about. [Morph] (boot-time slot verification) and [morph] (the
- *     per-morph ring-buffer dump) stay — both still have ongoing
+ *     per-morph ring-buffer dump) stay â€” both still have ongoing
  *     diagnostic value and neither spams continuously. CPS_LOG_PATCH's
  *     own comment is updated to match what is actually left under it.
- *     v0.9998 adds a proper animated splash screen — the last item on
- *     the v1.0 list — replacing the single line of plain boot text that
+ *     v0.9998 adds a proper animated splash screen â€” the last item on
+ *     the v1.0 list â€” replacing the single line of plain boot text that
  *     sat here since the very first version. The mark is a ring with a
  *     crosshair reaching to its edge (the finalized logo design: a
- *     circle, a thin inner ring, and four spokes to the outer edge —
+ *     circle, a thin inner ring, and four spokes to the outer edge â€”
  *     the same visual language as the IMU X/Y axis control this synth
  *     is built around), built once into a small sprite (splashLogo, a
- *     new global — an M5Canvas destructor would free the sprite buffer
+ *     new global â€” an M5Canvas destructor would free the sprite buffer
  *     on function return otherwise, while the animation is still using
  *     it) so it can be rotated as one unit via pushRotateZoom() rather
  *     than recomputing rotated geometry by hand every frame. The mark
  *     starts tilted (-28 degrees, as if just picked up) and eases to
- *     level over ~900ms (cubic ease-out — fast start, gentle stop, the
+ *     level over ~900ms (cubic ease-out â€” fast start, gentle stop, the
  *     one-shot version of the exponential-approach shape used
  *     elsewhere in this file for continuous smoothing, here driven by
  *     elapsed wall-clock time instead of a per-buffer constant since it
  *     only runs once). Once level, "CARDPUTER SYNTH", the version, and
  *     a credit line ("100% vibe-coded with Claude") appear underneath,
  *     all hand-centered the same way every other text draw in this file
- *     already is — no text-datum API is used anywhere else here, so
+ *     already is â€” no text-datum API is used anywhere else here, so
  *     this doesn't introduce one either.
  *     This call sits at exactly the position the old single-line text
- *     did, right before buildWaveTables() and the SD mount — both still
+ *     did, right before buildWaveTables() and the SD mount â€” both still
  *     slow enough to want covering, and both still run with the
  *     finished splash on screen, same as before, just with more to look
  *     at while they do.
- *     vTaskDelay(1) between animation frames, not delay() — this
+ *     vTaskDelay(1) between animation frames, not delay() â€” this
  *     project's own hard-won rule about delay() is specifically about
  *     loop()'s input-handling path (see the v0.99956-57 history), and
  *     neither risk that rule addresses applies here: this runs once in
  *     setup(), before loop() exists and before any input handling is
  *     possible. vTaskDelay(1) is used anyway simply because yielding to
  *     the scheduler for free is never worse than a bare spin-wait.
- *     UNVERIFIED on hardware — this is the project's first use of
+ *     UNVERIFIED on hardware â€” this is the project's first use of
  *     pushRotateZoom anywhere in the file; the call signature
  *     (dst_x, dst_y, angle, zoom_x, zoom_y) is confirmed correct against
  *     the M5GFX/LovyanGFX docs, but the visual timing, sizing, and
  *     legibility of the three text lines under the settled mark all
  *     need a real screen to judge.
- *     v0.9998, hardware-tested fixes: (1) SD card failed to mount —
+ *     v0.9998, hardware-tested fixes: (1) SD card failed to mount â€”
  *     traced to the sprite creation and its sustained pushRotateZoom()
  *     activity happening before the mount, the same class of bug this
  *     project hit once before (v0.99953-54, a diagnostic struct growing
@@ -3234,7 +3238,7 @@
  *     canvas/etc., buildWaveTables(), and the SD mount; the full rotating
  *     animation moved into drawSplashLogoAnimation(), now called AFTER
  *     the SD mount has already succeeded or failed. (2) Flicker during
- *     rotation — the per-frame fillScreen()+pushRotateZoom() were two
+ *     rotation â€” the per-frame fillScreen()+pushRotateZoom() were two
  *     separate, unbracketed display-bus writes, so the panel could show
  *     the intermediate all-black frame between them. Wrapped both in
  *     startWrite()/endWrite() so each frame is one atomic bus
@@ -3242,18 +3246,18 @@
  *     use. (3) The subtitle/version/credit lines were drawn back-to-back
  *     with nothing between the three drawString() calls, so despite the
  *     staggered reveal described when this was designed, nothing in the
- *     code actually paused between them — they always appeared together.
+ *     code actually paused between them â€” they always appeared together.
  *     Real vTaskDelay(pdMS_TO_TICKS(...)) pauses between each line fix
  *     that.
  *     v0.99981: the animation itself went missing on the next hardware
- *     test — the fallback text path (green "C.P.S." top-left, matching
+ *     test â€” the fallback text path (green "C.P.S." top-left, matching
  *     uiColor) confirmed the sprite allocation was now failing outright,
  *     even moved to after the SD mount. The likely reason: this board
  *     has no PSRAM at all (see the comment on the free-heap print right
- *     before the SD mount — internal DRAM is the only pool anything
+ *     before the SD mount â€” internal DRAM is the only pool anything
  *     here draws from, measured at only ~31KB free right after the
  *     mount), and the previous fix still placed the sprite creation
- *     AFTER ensureCpsFolder()/loadSettings()/morphLoadAllSlots() — the
+ *     AFTER ensureCpsFolder()/loadSettings()/morphLoadAllSlots() â€” the
  *     last of which reads up to 10 patch files off the card, a
  *     reasonable next suspect for eating further into or fragmenting
  *     whatever the mount left free. Two changes: the sprite shrinks
@@ -3268,31 +3272,31 @@
  *     with the boot log showing I2S DMA-buffer allocation failing in a
  *     tight repeating loop from the moment a key was first pressed.
  *     splashLogo was a global M5Canvas that createSprite() allocated but
- *     nothing ever freed — it sat there permanently, for the rest of the
+ *     nothing ever freed â€” it sat there permanently, for the rest of the
  *     program's life, occupying part of the same small internal-DRAM
  *     pool (no PSRAM on this board at all) that the speaker's own I2S
  *     driver later needs to claim DMA-capable buffers from. The
  *     previous round's fix (shrinking the sprite) was solving the wrong
- *     half of the problem — the actual fix is not holding onto it past
+ *     half of the problem â€” the actual fix is not holding onto it past
  *     the moment this function is done with it: splashLogo.deleteSprite()
  *     now runs at the end, returning that memory before setup() moves on
  *     to whatever needs it next.
  *     Separately, the same report described the ring appearing to swing
  *     across the screen ("drawn from bottom-left toward top-right")
- *     rather than spin in place — consistent with pushRotateZoom()
+ *     rather than spin in place â€” consistent with pushRotateZoom()
  *     rotating around the sprite's top-left corner instead of its
  *     center, since no setPivot() call had ever been made and every
  *     LovyanGFX example that uses this function calls it explicitly
  *     rather than assuming a center default. splashLogo.setPivot(35,35)
  *     (the sprite's actual center) is now set right after creation.
- *     v0.99983: the pivot fix didn't hold up — a second hardware round
+ *     v0.99983: the pivot fix didn't hold up â€” a second hardware round
  *     showed the exact same swing/arc rendering. Rather than continue
  *     debugging pushRotateZoom blind, on request, the rotation is
  *     removed entirely: the finished mark is drawn once, statically,
  *     via the plain pushSprite() every other sprite in this file
  *     already uses successfully, and the sequential subtitle/version/
- *     credit reveal underneath — already confirmed working across every
- *     round so far — now carries the whole splash on its own. If motion
+ *     credit reveal underneath â€” already confirmed working across every
+ *     round so far â€” now carries the whole splash on its own. If motion
  *     is wanted again later, a brightness fade-in was discussed as the
  *     natural next thing to reach for: no per-pixel resampling, just
  *     scaling the same static draw's color values a few times, cheaper
@@ -3301,7 +3305,7 @@
  *     v0.99984, two follow-ups after the static logo was confirmed
  *     working. The stray boot text shown during the SD-mount window
  *     ("C.P.S. CardPuter Synth", flashing briefly before the real splash
- *     replaced it) is gone, on request — drawSplashBootText() now just
+ *     replaced it) is gone, on request â€” drawSplashBootText() now just
  *     fills the screen black for that window instead. Separately, the
  *     staggered per-line reveal from two rounds ago felt too fast; it is
  *     replaced with the fade-in floated as an option back when the
@@ -3311,64 +3315,64 @@
  *     configured brightness via setBrightness() over ~900ms, then holds
  *     at full brightness for another ~900ms so the finished screen reads
  *     clearly for close to 2 seconds total, not just the fade. No new or
- *     unproven API — setBrightness() is the same call
+ *     unproven API â€” setBrightness() is the same call
  *     applyUiBrightness() already uses elsewhere in this file, so this
  *     sidesteps pushRotateZoom entirely, the API every hardware surprise
  *     in this feature so far has come from.
  *     v0.99985, cosmetic follow-ups once the fade-in itself was working:
  *     the logo sprite grows 70x70 -> 90x90 (16,200 bytes, still under the
- *     original 100x100's 20,000 — safe now that it's freed right after
+ *     original 100x100's 20,000 â€” safe now that it's freed right after
  *     use rather than held for the program's life, and this position
  *     after a successful SD mount was already hardware-confirmed at the
  *     smaller size). logoCy moves up 55->45 so the larger mark still
  *     clears the subtitle line below it. Separately, the fade read as
  *     too fast on real hardware: duration doubles 900ms->1800ms and the
- *     linear ramp is replaced with smoothstep (3p²-2p³), easing in and
+ *     linear ramp is replaced with smoothstep (3pÂ²-2pÂ³), easing in and
  *     out at both ends instead of changing brightness at a constant
- *     rate — the gentler curve that was asked for.
+ *     rate â€” the gentler curve that was asked for.
  *     v0.99986, two follow-ups from the same hardware round: the 90x90
- *     logo sprite failed to allocate — falling back to the plain
- *     "C.P.S." text path — so this reverts to the 70x70 size already
+ *     logo sprite failed to allocate â€” falling back to the plain
+ *     "C.P.S." text path â€” so this reverts to the 70x70 size already
  *     confirmed working across multiple earlier rounds, rather than
  *     guessing at a bigger size again without a failure-log number to
  *     size against.
  *     Separately, a saved brightness preference was found to apply the
- *     moment loadSettings() parsed it — landing in the middle of the
+ *     moment loadSettings() parsed it â€” landing in the middle of the
  *     splash's own fade-in and abruptly overriding it with whatever
  *     level was last saved, dim or otherwise, well before PLAY even
  *     appeared. applyUiBrightness() now checks a new
  *     bootBrightnessDeferred flag and skips the actual hardware call
  *     while it's set; setup() clears the flag and applies the real
- *     value exactly once, as its very last line — right as PLAY is
+ *     value exactly once, as its very last line â€” right as PLAY is
  *     about to appear, which is the moment being asked for. The splash's
  *     own fade is unaffected either way, since it calls
  *     M5Cardputer.Display.setBrightness() directly rather than through
  *     applyUiBrightness().
  *     v0.99987: trying bigger again, on request, but more cautiously
- *     than last time — 90x90 (v0.99985) failed outright, and there's
+ *     than last time â€” 90x90 (v0.99985) failed outright, and there's
  *     still no failure-log number to size confidently against. 80x80 is
  *     12,800 bytes, roughly a third more than 70x70's 9,800 rather than
- *     90x90's ~65% more — an incremental step instead of jumping
+ *     90x90's ~65% more â€” an incremental step instead of jumping
  *     straight back to the size that just failed. If this also fails,
  *     the existing [Splash] alloc-FAILED print will finally give an
  *     actual free-heap number to size the next attempt against.
  *     v0.99988: that log arrived, and it changes the picture. Free heap
  *     after the SD mount was 24,528 bytes, but the LARGEST CONTIGUOUS
- *     BLOCK was only 11,764 — the heap is fragmented after SD.begin(),
+ *     BLOCK was only 11,764 â€” the heap is fragmented after SD.begin(),
  *     not simply short on total free memory, so the real ceiling for a
  *     single allocation like this sprite is the block size, not the
  *     free-heap figure. 80x80 (12,800 bytes) exceeded that block by
  *     just over 1,000 bytes, exactly explaining the failure. Sized to
- *     75x75 (11,250 bytes) — about 500 bytes of margin under the
+ *     75x75 (11,250 bytes) â€” about 500 bytes of margin under the
  *     measured ceiling, since fragmentation can vary slightly boot to
  *     boot and 76x76 (11,552) would leave almost none. Going bigger
  *     than this would mean addressing the fragmentation itself, not
- *     picking a larger number — a different problem than the one this
+ *     picking a larger number â€” a different problem than the one this
  *     round's log answered.
  *     v0.99989: the credit line ("100% vibe-coded with Claude") is
- *     removed, on request — it read as too prominent sitting right
+ *     removed, on request â€” it read as too prominent sitting right
  *     below the version number. The mark, subtitle, and version remain.
- *     v1.0: the official release. No functional change from v0.99989 —
+ *     v1.0: the official release. No functional change from v0.99989 â€”
  *     this is the version number itself moving, marking every feature,
  *     fix, and piece of documentation built across the v0.9.x line
  *     (waveform library, Shape, Osc2, the FX tab, Morphing, MIDI,
@@ -3376,36 +3380,36 @@
  *     hardware-tested fixes behind all of it) as done.
  *     v0.99961: PLAY's HELP line listed Latch before Arp
  *     ("D:Hold V:Latch Sh+V:Arp"), backwards from how they actually
- *     relate — Latch presupposes Arp is already running, so reads more
+ *     relate â€” Latch presupposes Arp is already running, so reads more
  *     naturally the other way around. Swapped to "D:Hold Sh+V:Arp
  *     V:Latch". No key binding changed, display order only.
- *     SETTING menu hierarchy reviewed as the next UI/UX backlog item —
+ *     SETTING menu hierarchy reviewed as the next UI/UX backlog item â€”
  *     category list, per-category item counts, and the one existing
  *     two-level split (MIDI Out/In) all checked out with nothing to
  *     restructure; the owner had no specific friction to point at
  *     either, so this one closes without a code change.
  *     v0.99962: Randomize's own v0.993 audit comment already flagged
- *     that features added after it was written kept slipping past it —
+ *     that features added after it was written kept slipping past it â€”
  *     Portamento (porta_enabled/porta_speed) and Arp's own
  *     Tempo/Swing/Rate turned out to be the next ones, found while
  *     checking Randomize's coverage for the UI/UX pass. All are saved as
  *     part of a patch, same as everything else this function already
  *     covers, so the omission was real.
  *     Neither joins the general "randomize freely" treatment. Portamento
- *     is an on/off decision first — most patches do not want a permanent
- *     glide — and only gets a speed when it lands on. Tempo is left alone
+ *     is an on/off decision first â€” most patches do not want a permanent
+ *     glide â€” and only gets a speed when it lands on. Tempo is left alone
  *     entirely: retuning the whole instrument's tempo out from under
  *     whatever the player was doing would be a far bigger surprise than
  *     a random filter cutoff, and tempo is something the player already
  *     controls directly far more often than they author it into a patch
- *     — including via Tap Tempo, added this same phase.
+ *     â€” including via Tap Tempo, added this same phase.
  *   - IMU (BMI270) tilt-to-parameter mapping across 17 targets (customizable,
  *     hold state and frozen value persist across save/load), selected via
  *     a scrollable picker grouped by category (Pitch/Volume/Timbre/Filter/LFO/Effect)
  *   - Per-axis IMU fine control: Sensitivity, Invert, response Curve
  *     (Linear/Exponential), Deadzone, and a Calibrate ON/OFF toggle
  *     (ON opens a confirm dialog and re-zeros to current tilt, OFF resets)
- *     [CardputerADV only — see below for original Cardputer]
+ *     [CardputerADV only â€” see below for original Cardputer]
  *   - IMU Volume target is now a relative multiplier of the current
  *     volume (0-100%), so it can only attenuate, never exceed the set level
  *   - Patch Bank: save/load full synth state (incl. IMU mapping/hold
@@ -3418,82 +3422,82 @@
  *     slots (1-8), stored under /CPS/Pattern as one file per slot
  *     (e.g. /CPS/Pattern/A1.json). Accessed via SETTING > Pattern >
  *     Save/Load, a grid browser (own AppMode::PATTERN, own Tab handling
- *     like Patch Bank) — navigate with ;/./,//,  confirm with Enter,
+ *     like Patch Bank) â€” navigate with ;/./,//,  confirm with Enter,
  *     Backspace clears the selected slot (with a Y/N confirm, same for
  *     overwriting an occupied slot on Save). Reuses the exact same
  *     seq_tempo/seq_swing/seqN_* field names the main settings file
  *     already uses for the Sequencer, via a shared writeSeqPatternFields()
- *     helper (save) and the existing parseSettingLine() (load) — a
+ *     helper (save) and the existing parseSettingLine() (load) â€” a
  *     pattern file is really just a tiny settings file scoped to only
  *     those fields. SETTING > Pattern > Random generates a fresh 16-step
  *     pattern in-key with the current scale (picked from the same
  *     row1Freqs/row2Freqs tables note entry uses), including Tie/Accent/
- *     Slide, not just pitch/velocity — behind the same confirm dialog as
+ *     Slide, not just pitch/velocity â€” behind the same confirm dialog as
  *     Randomize Patch. Tempo/Swing are left untouched (pattern-level, not
  *     part of "randomize the steps"). Randomize Patch's own Noise amount
  *     is deliberately rare (15% chance) and subtle (5-20%) when it does
- *     apply — full 0-100% randomization made pitch clarity noticeably
+ *     apply â€” full 0-100% randomization made pitch clarity noticeably
  *     worse even at seemingly-low rolls. SETTING > Pattern is hidden
  *     while PLAY is the active home mode (only meaningful from SEQ),
- *     the mirror image of Arp being hidden from SEQ — needed splitting
+ *     the mirror image of Arp being hidden from SEQ â€” needed splitting
  *     original Cardputer's settings list into PLAY/SEQ variants too,
  *     which it didn't have before (Pattern showed regardless of home
  *     mode there).
  *   - Song mode (Phase 4 continued, v0.95-v0.953): arranges saved
  *     Pattern Bank patterns into a sequence and plays them back. Its own
- *     AppMode::SONG, entered via a LONG press (500ms) of G0 — short
+ *     AppMode::SONG, entered via a LONG press (500ms) of G0 â€” short
  *     press keeps the existing PLAY<->SEQ toggle unchanged, now resolved
  *     on release instead of press-down so the two can be told apart.
  *     Has its own fixed UI color (cyan) rather than inheriting PLAY's
- *     green or SEQ's orange, since it's a distinct third mode — `uiColor`
+ *     green or SEQ's orange, since it's a distinct third mode â€” `uiColor`
  *     is computed once per loop() iteration, AFTER all of that frame's
  *     mode-changing input (G0, Tab-cycle, and each mode's own Tab
  *     handling) has already been processed, not at the very top of
- *     loop() — computing it too early meant a mode change and its color
+ *     loop() â€” computing it too early meant a mode change and its color
  *     update landed on different frames, causing a stale/mixed-color
  *     flash right at the moment of switching (fixed in v0.954). Each song
  *     entry references a Pattern Bank slot (bank+slot) plus its own
- *     Transpose (semitones, chromatic — consistent with how Octave/
+ *     Transpose (semitones, chromatic â€” consistent with how Octave/
  *     Transpose already works elsewhere, not a scale-aware diatonic
- *     shift) and Repeat count (times through before advancing) — a new
+ *     shift) and Repeat count (times through before advancing) â€” a new
  *     entry inherits the Bank/Slot of whichever entry the cursor was on
  *     (handy for building similar-pattern sequences), but Transpose/
  *     Repeat reset to defaults rather than also carrying over. Two
  *     global toggles: whether each entry uses its own saved pattern's
- *     Tempo/Swing ('I' key, on by default — patterns already save these,
+ *     Tempo/Swing ('I' key, on by default â€” patterns already save these,
  *     so this comes for free) or a dedicated Song-level Tempo/Swing
  *     instead throughout, and whether the song loops back to the start
  *     after the last entry or stops ('O' key, loop by default). Editor
  *     has two focuses (like SEQ's STEP/PATTERN split): 'f' toggles
- *     between Entry focus (,// moves the entry cursor — matching the
+ *     between Entry focus (,// moves the entry cursor â€” matching the
  *     horizontal timeline's own layout, swapped from SEQ's convention in
- *     v0.961 per user feedback — 'g' cycles which field — Bank/Slot/
- *     Transpose/Repeat — ;/. adjusts it) and Song
- *     focus ('g' cycles Tempo/Swing instead, ;/. adjusts it) — the
+ *     v0.961 per user feedback â€” 'g' cycles which field â€” Bank/Slot/
+ *     Transpose/Repeat â€” ;/. adjusts it) and Song
+ *     focus ('g' cycles Tempo/Swing instead, ;/. adjusts it) â€” the
  *     Song-level Tempo/Swing and Volume are always shown regardless of
  *     focus, matching how SEQ always shows every value rather than
  *     hiding the non-selected ones. Volume (k/l) and other non-
  *     conflicting performance keys work here too, same "usable anywhere
- *     except Patch" principle as elsewhere — Shift+S/Shift+L are
+ *     except Patch" principle as elsewhere â€” Shift+S/Shift+L are
  *     reserved for Save/Load specifically in SONG, so the plain
  *     IMU-Y-hold/Volume-up meanings of 's'/'l' are skipped there, same
  *     pattern as SEQ's Shift+C/Shift+X reservations. Enter inserts a new
  *     entry after the cursor, Backspace deletes the selected entry,
  *     Space plays/stops the song, Shift+S/Shift+L open a Save/Load slot
- *     picker (8 numbered slots, no lettered banks — fewer songs expected
+ *     picker (8 numbered slots, no lettered banks â€” fewer songs expected
  *     than patterns) under /CPS/Song, Tab returns to whichever of
  *     PLAY/SEQ was home.
  *     Visual design (v0.96): rather than a plain text list, entries show
  *     as a horizontal timeline of fixed-width blocks colored by Bank
- *     letter (A-H each get a distinct fixed color, songBankColors[]) —
+ *     letter (A-H each get a distinct fixed color, songBankColors[]) â€”
  *     the playing entry's block turns white, the edit cursor's block
  *     gets a white outline instead (so both can show distinctly even on
  *     the same block); a thin bar under each block is proportional to
  *     that entry's Repeat count. Below the timeline, a small step-grid
- *     preview (mirroring SEQ's own grid look, but simplified — filled=
+ *     preview (mirroring SEQ's own grid look, but simplified â€” filled=
  *     note, half-height=Tie, no velocity/accent detail) shows the actual
  *     shape of whichever pattern is currently playing, or the cursor's
- *     entry when stopped — read via a new loadPatternPreview() into a
+ *     entry when stopped â€” read via a new loadPatternPreview() into a
  *     dedicated songPreviewSteps[] buffer (cached by bank+slot) so
  *     browsing entries in the editor never disturbs the live seqSteps[]
  *     that may actually be playing.
@@ -3505,7 +3509,7 @@
  *     (songAdvanceOnPassComplete(), called from updateSeqTiming()) counts
  *     against the entry's Repeat count before advancing (or looping/
  *     stopping at the end of the song). Deliberately simple/no pre-fetch
- *     — each entry transition does a synchronous SD card read; verified
+ *     â€” each entry transition does a synchronous SD card read; verified
  *     on hardware with no audible hiccup at pattern boundaries so far.
  *     SEQ also has step Copy/Cut/Paste: 'V' marks/confirms/clears a
  *     step-range selection (shown as a yellow strip above the selected
@@ -3516,7 +3520,7 @@
  *     freeing them from their usual meanings specifically within SEQ:
  *     plain 'V' no longer toggles Arp Latch there (Shift+V still toggles
  *     Arp on/off everywhere, unchanged), and Shift+C/Shift+X no longer
- *     also fire Portamento-toggle/Bend-up there — chosen because Arp
+ *     also fire Portamento-toggle/Bend-up there â€” chosen because Arp
  *     Latch has no audible effect during SEQ anyway (Arp is suppressed
  *     while a pattern plays), same reasoning as hiding SETTING > Arp
  *     from SEQ.
@@ -3525,21 +3529,21 @@
  *     Portamento categories each have their own separate reset
  *   - Randomize: Patch category can also randomize every tone parameter
  *     (incl. filter type, LFO wave/target, IMU targets) behind a confirm
- *     dialog — a quick way to discover new sounds
+ *     dialog â€” a quick way to discover new sounds
  *   - Play Mode (SETTING > Play Mode): EZ Mode (default) vs Pro Mode,
  *     see above
- *   - Scale (SETTING > Play Mode > Scale, Pro Mode only — EZ Mode is
+ *   - Scale (SETTING > Play Mode > Scale, Pro Mode only â€” EZ Mode is
  *     always Major): choose from 49 scales across 9 categories
  *     (Chromatic, Classical, Symmetrical, Pentatonic, Japan, China,
  *     India, Middle East, Europe) via a 2-level picker (v0.954 added 16
- *     more — Harmonic/Neapolitan Major, Lydian Augmented/Dominant,
+ *     more â€” Harmonic/Neapolitan Major, Lydian Augmented/Dominant,
  *     2 Messiaen modes, 2 more pentatonics, Ahir Bhairav/Marva/Purvi/
- *     Charukeshi, Nikriz/Persian, Romanian Minor/Hungarian Major — all
+ *     Charukeshi, Nikriz/Persian, Romanian Minor/Hungarian Major â€” all
  *     appended after the existing entries rather than inserted, so any
  *     already-saved currentScaleIndex stays pointing at the same scale).
  *     New scales are always appended, never inserted, for this reason.
  *     The per-category index buffer used by the picker was bumped from
- *     16 to 32 slots to leave headroom for further additions — Classical
+ *     16 to 32 slots to leave headroom for further additions â€” Classical
  *     is the largest category so far at 13. Selecting a
  *     scale takes effect immediately, so holding a note key while
  *     scrolling previews it live. Current scale (with category) is
@@ -3550,7 +3554,7 @@
  *     step, 1/1 to 1/32 incl. two triplets), and Swing (-100% to +100%:
  *     positive delays the off-beat step for a classic swung feel,
  *     negative pushes it earlier for a pushed/anticipated feel). Tempo
- *     and Swing can also be assigned as IMU targets — both are always
+ *     and Swing can also be assigned as IMU targets â€” both are always
  *     bipolar (+/- the base value) regardless of the axis's own
  *     Invert/bipolar setting, same as Pitch Bend. Each step
  *     force-retriggers the envelope for a percussive, stepped feel.
@@ -3563,22 +3567,22 @@
  *     every held note (press order) with the currently-sounding one
  *     highlighted, in place of the normal single note-name display.
  *     Since notes now work on every screen (see above), this preview
- *     works everywhere too — including while adjusting Arp's own
+ *     works everywhere too â€” including while adjusting Arp's own
  *     settings, without needing to back out to PLAY first.
  *   - Step Sequencer: a 16-step, TB-303-style pattern. Each step has a
  *     Note (or Rest), Velocity, and three performance flags: Tie
- *     (extends the previous note instead of retriggering — chaining
+ *     (extends the previous note instead of retriggering â€” chaining
  *     consecutive Tie steps is how a note's length varies, instead of a
  *     Gate percentage), Slide (glides from the previous pitch to this
  *     one instead of retriggering, via its own lightweight portamento-
  *     style glide independent of the global Portamento toggle), and
  *     Accent (boosts this step's Velocity and gives the filter cutoff a
  *     temporary boost, for the classic TB-303 "punch"). Has its own
- *     independent Tempo and Swing (separate from the Arpeggiator's —
+ *     independent Tempo and Swing (separate from the Arpeggiator's â€”
  *     PLAY and SEQ are treated as distinct performance modes with their
  *     own timing), though assigning the Arpeggiator's Tempo/Swing IMU
  *     targets controls the Sequencer's instead whenever SEQ is the
- *     active home mode — one target per axis works contextually for
+ *     active home mode â€” one target per axis works contextually for
  *     both. Works on both boards (unlike the Arpeggiator) since
  *     entering one note per step doesn't need multi-key rollover.
  *     Accessed via its own SEQ mode (see G0 button below) rather than
@@ -3587,21 +3591,21 @@
  *     hidden while SEQ is the active home mode, since the Arpeggiator
  *     needs live chord-holding that SEQ playback suppresses.
  *     Orange accent color applies to the ENTIRE UI (not just the SEQ
- *     screen itself) whenever SEQ is the active home mode — even while
- *     viewing VCO/VCF/etc — so it's always visible at a glance which
+ *     screen itself) whenever SEQ is the active home mode â€” even while
+ *     viewing VCO/VCF/etc â€” so it's always visible at a glance which
  *     mode you're in; a first step toward user-customizable UI colors,
  *     planned for later.
  *     The SEQ screen otherwise mirrors PLAY's layout exactly (no
  *     waveform, but the same IMU/PAD block, gauge bars, Bend meter, and
  *     Scale name display on the right/bottom, working identically):
- *     step grid where the waveform would be — each step shows Velocity
+ *     step grid where the waveform would be â€” each step shows Velocity
  *     as a bottom-aligned bar (taller = louder); a run of Tie-connected
  *     steps merges into one shape (thick outer border, no internal
  *     vertical line at the join) so it visibly reads as one sustained
  *     note, while each step's own bar segment still shows (using the
  *     run's starting velocity) so the cursor/playhead can still pick out
  *     individual steps within it; Accent turns the bar red instead of
- *     the usual orange (a shape-based indicator — a triangle top — was
+ *     the usual orange (a shape-based indicator â€” a triangle top â€” was
  *     tried first but proved hard to distinguish at 13px step width;
  *     color reads reliably at any size). Slide gets a small diagonal
  *     notch at the bottom-left corner. Velocity carries over from
@@ -3620,7 +3624,7 @@
  *     while tweaking VCO/VCF/etc.
  *     Controls: ','/'/' move the step cursor, note keys assign that
  *     pitch to the selected step (playing a brief preview so you can
- *     hear it, and auto-advancing the cursor to the next step — use
+ *     hear it, and auto-advancing the cursor to the next step â€” use
  *     ,// instead of a note key to skip a step and leave it as a rest),
  *     Backspace clears the selected step entirely (note + Tie/Slide/
  *     Accent) back to a plain rest, Shift+Backspace clears the whole
@@ -3634,7 +3638,7 @@
  *     which of the current focus's values ';'/'.' affects. All the
  *     step's values, plus Tempo/Swing, Octave/Transpose, and Portamento/
  *     Hold status (both usable here too, same as PLAY), are always
- *     shown on screen regardless of focus — only a single "Ed:" label
+ *     shown on screen regardless of focus â€” only a single "Ed:" label
  *     indicates which one is currently adjustable. Shift +
  *     ';'/'.'/','/'/ ' adjusts Octave/Transpose on CardputerADV,
  *     mirroring PLAY's unshifted keys for muscle-memory consistency
@@ -3642,13 +3646,13 @@
  *     collide with SEQ's own keys).
  *     While playing, the Sequencer keeps looping even on other screens
  *     (VCO/VCF/etc, but not SEQ's own editing), so tone/filter changes
- *     can be heard against the pattern — normal note-triggering and the
+ *     can be heard against the pattern â€” normal note-triggering and the
  *     Arpeggiator are suppressed while it's playing, to avoid fighting
  *     over which note is currently sounding. Volume ('k'/'l', shown on
  *     screen too) now works on every screen except the Patch Bank, same
  *     as note-triggering. Assigning the same "ArpTempo"/"ArpSwing" IMU
  *     targets used by the Arpeggiator instead controls the Sequencer's
- *     own Tempo/Swing whenever SEQ is the active home mode — one target
+ *     own Tempo/Swing whenever SEQ is the active home mode â€” one target
  *     per axis works contextually for both, no separate assignment
  *     needed per mode. Switching between PLAY and SEQ via G0 silences
  *     whatever was sounding (sequencer playback, an Arp chord, or a
@@ -3659,7 +3663,7 @@
  *     "home" position that Tab cycling returns to after SETTINGS.
  *   - Tab key cycles: PLAY/SEQ (whichever is current) -> VCO -> VCF ->
  *     VCA -> LFO -> SETTINGS -> back to PLAY/SEQ. Shift+Tab cycles the
- *     same chain backward (v0.97) — same edge-tracker, just a reversed
+ *     same chain backward (v0.97) â€” same edge-tracker, just a reversed
  *     switch statement when Shift is held. PATCH/PATTERN/SONG each
  *     handle their own Tab (always "back", no forward/reverse
  *     distinction there) and aren't part of this cycle.
@@ -3670,14 +3674,14 @@
  *   Board type is auto-detected at boot (M5.getBoard()). On original
  *   Cardputer:
  *   - Octave shift moves to 'J' (up) / 'N' (down); Transpose moves to
- *     'M' (up) / 'B' (down) — freeing ';' '.' ',' '/' for PAD control
+ *     'M' (up) / 'B' (down) â€” freeing ';' '.' ',' '/' for PAD control
  *   - IMU is replaced by a key-driven "PAD": ';' / '.' move a virtual
  *     Y axis up/down, ',' / '/' move a virtual X axis left/right.
  *     Moves toward the extreme while held, springs back to center on
- *     release — unless that axis's Hold ('A'/'S', unchanged) is on, in
+ *     release â€” unless that axis's Hold ('A'/'S', unchanged) is on, in
  *     which case it stays wherever it was instead of springing back.
  *     Everywhere the UI said "IMU" now says "PAD" instead.
- *   - Deadzone and Calibrate are hidden from the PAD sub-menu — neither
+ *   - Deadzone and Calibrate are hidden from the PAD sub-menu â€” neither
  *     concept applies to a clean key-driven signal (no sensor noise to
  *     filter, no physical zero-point to correct)
  *   - Arpeggiator is not available: it needs multi-key chord holding,
@@ -3685,15 +3689,15 @@
  *   - IMPORTANT: the original Cardputer's GPIO-matrix keyboard only
  *     reliably supports 3 simultaneous key presses. Pressing a 4th key
  *     at the same time can cause "ghosting" (incorrect/missing key
- *     detection) — this is a hardware limitation of the original
+ *     detection) â€” this is a hardware limitation of the original
  *     Cardputer itself and cannot be fully corrected in software, since
  *     the ambiguity already exists by the time a key press reaches this
  *     app. Keep this in mind with combinations like note + PAD + Bend.
  *
  * Display rendering: every screen draws into a single off-screen canvas
- * (M5Canvas, 240x135, in internal DRAM — there is no PSRAM on this
+ * (M5Canvas, 240x135, in internal DRAM â€” there is no PSRAM on this
  * hardware, whatever this comment used to claim) and pushes the frame to the
- * display in one single transfer, instead of many small direct draws —
+ * display in one single transfer, instead of many small direct draws â€”
  * this eliminates a diagonal tearing/flicker artifact that was visible
  * whenever several UI elements updated in the same frame. Shared drawing
  * helpers (drawTabBar, drawWaveform, drawBendMeter, drawImuPad,
@@ -3708,7 +3712,7 @@
  * skipped when the waveform hasn't meaningfully changed), canvasName
  * (x=0-73, y=55-112: note info, always pushed since that's what changes
  * on every note keypress), canvasImu (x=73-240, y=55-112: bend meter,
- * IMU pad+readout, volume — skipped when none of those values actually
+ * IMU pad+readout, volume â€” skipped when none of those values actually
  * changed, which is the common "IMU=None, just playing notes" case),
  * and canvasNav (y=113-134: scale name + nav text, rarely changes).
  * This was needed because even DMA-based SPI transfers still consume
@@ -3730,16 +3734,16 @@
 
 #include "M5Cardputer.h"
 #include <math.h>
-#include <string.h>   // memset() — clearFxBuffers() (v0.9875)
-#include <stdarg.h>   // va_list — sbAppend() (v0.9913)
+#include <string.h>   // memset() â€” clearFxBuffers() (v0.9875)
+#include <stdarg.h>   // va_list â€” sbAppend() (v0.9913)
 #include <Wire.h>
 #include <VL53L1X.h>   // theremin distance sensor (v0.999)
 #include <esp_system.h>   // esp_reset_reason() (v0.99913)
 
 // ---- Diagnostic logging (v0.9989) ----
 //
-// These logs have found several real faults — the SD-mount failure, the
-// stale morph snapshots, whether MIDI bytes were arriving at all — so they
+// These logs have found several real faults â€” the SD-mount failure, the
+// stale morph snapshots, whether MIDI bytes were arriving at all â€” so they
 // are kept rather than deleted. But MIDI clock arrives 24 times per BEAT,
 // which at 120bpm is 48 bytes a second of nothing but timing, and the
 // per-second byte counter would then never fall silent. A log that always
@@ -3759,8 +3763,8 @@
 // [Morph] slot loads (boot-time patch-snapshot verification), [morph]
 // (per-morph diagnostic ring buffer, dumped on completion). A UI/UX-phase
 // pass (v0.9997x) retired several investigation-specific diagnostics that
-// had done their job — [tab], [arp], [arpTiming], [retrigger], [bitcrush],
-// and the watchdog's per-change/per-5s confirmation logging — since each
+// had done their job â€” [tab], [arp], [arpTiming], [retrigger], [bitcrush],
+// and the watchdog's per-change/per-5s confirmation logging â€” since each
 // was fixing a since-resolved bug and had gone from useful to just noise
 // for ordinary use.
 #define CPS_LOG_PATCH 1
@@ -3782,20 +3786,20 @@ constexpr int SETTINGS_BUF_SIZE = 8192;
 // caught mid-update content). Sized to the full physical display
 // (240x135) and created in setup().
 M5Canvas canvas(&M5Cardputer.Display);
-// Splash-screen logo sprite (v0.9998) — built once in
+// Splash-screen logo sprite (v0.9998) â€” built once in
 // drawSplashLogoAnimation(),
 // rotated as a whole unit via pushRotateZoom() during the boot animation.
 // Global (not local to that function) because M5Canvas's destructor would
 // otherwise free the sprite's buffer the moment the function returns,
 // while the animation is still running.
 M5Canvas splashLogo(&M5Cardputer.Display);
-// PLAY-only dirty-rect split (v0.937, further split in v0.9372 — see
+// PLAY-only dirty-rect split (v0.937, further split in v0.9372 â€” see
 // canvasName/canvasImu/canvasNav below): PLAY is redrawn far more often
 // than any other screen (every note key press), so its 63KB full-canvas
 // push was the main contributor to an audible crackle correlated with
-// key presses — SPI-DMA bus time for a ~65KB transfer occasionally
+// key presses â€” SPI-DMA bus time for a ~65KB transfer occasionally
 // overlapped audioTask's real-time budget on Core 0. canvasTop (tab bar
-// + waveform, y=0-54, no coordinate offset needed — already 0-based) is
+// + waveform, y=0-54, no coordinate offset needed â€” already 0-based) is
 // pushed independently from the rest, and skipped entirely when nothing
 // is modulating Timbre/PWM. Other screens (SEQ/VCO/etc) and the HELP
 // overlay still use the single full-size `canvas` above, unchanged.
@@ -3843,7 +3847,7 @@ int16_t halfSineTable[WAVE_TABLE_SIZE];   // v0.9831: 6th morph waveform
 // table sample between its A (Shape=0) and B (Shape=1) variant BEFORE
 // the morph blend runs, the same interpolate-by-index approach already
 // used for morphing between waveforms. This absorbs the old PWM control
-// entirely — Square's own Shape variants ARE what PWM used to be
+// entirely â€” Square's own Shape variants ARE what PWM used to be
 // (duty cycle 50%->10%), just reframed as one instance of the same
 // per-waveform mechanism every other waveform now also gets.
 int16_t sineTableB[WAVE_TABLE_SIZE];
@@ -3852,14 +3856,14 @@ int16_t sawtoothTableB[WAVE_TABLE_SIZE];
 int16_t wavefolderTableB[WAVE_TABLE_SIZE];
 int16_t halfSineTableB[WAVE_TABLE_SIZE];
 // v0.986: 2 more waveforms. Shape=1 variants for these two are simply
-// the same as Shape=0 for now (Shape has no effect on them yet) — kept
+// the same as Shape=0 for now (Shape has no effect on them yet) â€” kept
 // simple/low-risk for this round; dedicated Shape curves for these can
 // follow later the same way the original 6 got theirs.
 int16_t parabolicTable[WAVE_TABLE_SIZE];
 int16_t esawTable[WAVE_TABLE_SIZE];
 // v0.9862: 4 more waveforms, all built via simple phase-distortion /
 // waveshaping formulas (a sine whose phase or amplitude is warped by a
-// second sine) — a classic, cheap (boot-time only) way to get distinct
+// second sine) â€” a classic, cheap (boot-time only) way to get distinct
 // characters without needing full harmonic-series summation each time.
 int16_t squeezeTable[WAVE_TABLE_SIZE];
 int16_t esquareTable[WAVE_TABLE_SIZE];
@@ -3867,7 +3871,7 @@ int16_t saw2Table[WAVE_TABLE_SIZE];
 int16_t square2Table[WAVE_TABLE_SIZE];
 // v0.9863: Shape=1 tables for the 6 waveforms that didn't have one yet.
 // Each uses the SAME formula family as its Shape=0 table, just with the
-// defining parameter intensified — the same "turn the same knob further"
+// defining parameter intensified â€” the same "turn the same knob further"
 // approach already used for Wavefolder's own Shape=1 (higher drive).
 int16_t parabolicTableB[WAVE_TABLE_SIZE];
 int16_t esawTableB[WAVE_TABLE_SIZE];
@@ -3895,7 +3899,7 @@ const char *OSC_WAVEFORM_NAMES[NUM_OSC_WAVEFORMS] = {"Sine","Triangle","Sawtooth
 // (and existing saved Patches, which only ever stored a plain morph
 // float) is unaffected until someone actually opens SETTING > Timbre
 // and changes it.
-// The default chain is the four waveforms the synth shipped with —
+// The default chain is the four waveforms the synth shipped with â€”
 // Sine, Triangle, Sawtooth, Square (v0.9933). It had been six, picking up
 // Wavefolder and Half-Sine when those were added, but the default ought to
 // be the plain starting point a beginner meets and the thing a tone reset
@@ -3930,7 +3934,7 @@ int16_t *oscWaveformTableB(OscWaveform w){
         case OscWaveform::SAWTOOTH:   return sawtoothTableB;
         // Square deliberately returns its Shape=0 table here (v0.9891).
         // Its Shape is a duty-cycle sweep, which a crossfade between two
-        // fixed tables physically cannot produce — mixing a 50% square
+        // fixed tables physically cannot produce â€” mixing a 50% square
         // with a 10% pulse gives their SUM, a stepped three-level shape,
         // not a 30% square. Returning the same table both sides makes the
         // generic blend a no-op, and updateSquareDuty() rebuilds the table
@@ -3956,7 +3960,7 @@ int16_t *oscWaveformTableB(OscWaveform w){
 // 44100 times a second just to arrive at addresses that only change when
 // the user edits the Morph chain. That is exactly the "expensive work at
 // buffer rate, cheap work per sample" rule this file applies everywhere
-// else — it had simply never been applied here.
+// else â€” it had simply never been applied here.
 //
 // Resolving them into a flat array turns the inner loop into plain
 // indexed loads. The output is bit-identical: same tables, same order,
@@ -3965,20 +3969,20 @@ int16_t *oscWaveformTableB(OscWaveform w){
 // Cross-core guard for morphChain[]/morphChainLen/morphTblA/morphTblB
 // (v0.99943). morphStart() (loop(), APP core) rewrites all three across
 // several separate statements, and getMorphedSample() (audioTask, PRO
-// core — a genuinely different physical core, not just a cooperative
+// core â€” a genuinely different physical core, not just a cooperative
 // task) reads them on every sample with no synchronisation at all before
 // this. A read landing mid-update could see, for instance, the new
 // chainLen paired with pointer slots the chain-array copy hadn't reached
-// yet — read as either a stale waveform in the wrong position (heard as
+// yet â€” read as either a stale waveform in the wrong position (heard as
 // noise) or, if the still-null-pointer path is hit, a race between
 // audioTask's own defensive refresh and morphStart()'s refresh running on
 // the other core at the same time, each partially overwriting the same
-// arrays (a very plausible source of the intermittent silence reported —
+// arrays (a very plausible source of the intermittent silence reported â€”
 // no fixed repro is exactly what an unsynchronised cross-core race looks
 // like from the outside).
 //
-// Deliberately only guards the RARE paths — morphStart() itself, and
-// getMorphedSample()'s fallback refresh when a pointer is still null —
+// Deliberately only guards the RARE paths â€” morphStart() itself, and
+// getMorphedSample()'s fallback refresh when a pointer is still null â€”
 // not the hot per-sample lookup. A spinlock on every one of ~44100
 // calls/sec would cost real CPU for no benefit; the common case never
 // touches morphTblA/morphTblB while they are mid-update, so it needs no
@@ -3988,14 +3992,14 @@ portMUX_TYPE morphChainMux=portMUX_INITIALIZER_UNLOCKED;
 int16_t *morphTblA[MAX_MORPH_SLOTS]={nullptr};
 int16_t *morphTblB[MAX_MORPH_SLOTS]={nullptr};
 void refreshMorphTablePtrs(){
-    // Self-locking (v0.99943) so every caller — writers right after
-    // editing the chain, and audioTask reading it on the other core —
+    // Self-locking (v0.99943) so every caller â€” writers right after
+    // editing the chain, and audioTask reading it on the other core â€”
     // is protected without each having to remember to take the lock
     // itself. ESP32's portMUX spinlocks are re-entrant by the same core,
     // so a caller that already holds the lock (see morphStart()) nests
     // safely rather than deadlocking. The body is a handful of array
-    // copies, not real work, so locking every call — including the one
-    // audioTask makes unconditionally each buffer — costs nothing
+    // copies, not real work, so locking every call â€” including the one
+    // audioTask makes unconditionally each buffer â€” costs nothing
     // measurable next to the ~23ms it has to do it in.
     portENTER_CRITICAL(&morphChainMux);
     for(int i=0;i<morphChainLen&&i<MAX_MORPH_SLOTS;i++){
@@ -4025,10 +4029,10 @@ constexpr float SAW2_AMP       = 26000.0f;
 constexpr float SQUARE2_AMP    = 24000.0f;
 
 // ---------------------------------------------------------
-// Note-key layout — shared physical layout for EZ and Pro Mode
+// Note-key layout â€” shared physical layout for EZ and Pro Mode
 // ---------------------------------------------------------
 // Both modes use the same two physical rows of 13 keys each:
-//   Row 1 (number row): "1234567890-=" + Backspace (13th key — not a
+//   Row 1 (number row): "1234567890-=" + Backspace (13th key â€” not a
 //   printable character, so it's detected via KeysState.del instead of
 //   .word; see resolveFreqFromKeys())
 //   Row 2 (qwerty row, some octaves below Row 1): "qwertyuiop[]\"
@@ -4046,7 +4050,7 @@ float row2Freqs[13];
 // Each scale is a set of semitone offsets from the root (fixed at C, since
 // Transpose already covers changing key). The 13 keys of a row are mapped
 // onto the scale degrees in order, wrapping into the next octave once the
-// scale's own note count is exceeded — e.g. a 5-note pentatonic scale
+// scale's own note count is exceeded â€” e.g. a 5-note pentatonic scale
 // spans keys 1-5 (octave 1), 6-10 (octave 2), 11-13 (start of octave 3).
 // Row 2 uses the same scale, shifted down by just enough octaves that its
 // own 13th key lands at or below Row 1's root (see computeRow2OctaveShift).
@@ -4059,7 +4063,7 @@ const char *SCALE_CATEGORY_NAMES[] = {
 constexpr int NUM_SCALE_CATEGORIES = sizeof(SCALE_CATEGORY_NAMES)/sizeof(SCALE_CATEGORY_NAMES[0]);
 
 const ScaleDef SCALES[]={
-    // Chromatic — Pro Mode's default (reproduces the original layout)
+    // Chromatic â€” Pro Mode's default (reproduces the original layout)
     {"Chromatic",     0,{0,1,2,3,4,5,6,7,8,9,10,11},12},
     // Classical / church modes
     {"Major",         1,{0,2,4,5,7,9,11},   7},
@@ -4088,7 +4092,7 @@ const ScaleDef SCALES[]={
     {"Kumoi",            4,{0,2,3,7,9},  5},
     {"Yo Scale",         4,{0,2,5,7,9},  5},
     {"Ryukyu (Okinawa)", 4,{0,4,5,7,11}, 5},
-    // China — the traditional pentatonic (Gong/Shang/Jue/Zhi/Yu) is
+    // China â€” the traditional pentatonic (Gong/Shang/Jue/Zhi/Yu) is
     // intervallically the same 5-note set as Western pentatonic, just
     // started from a different degree (like a mode). Gong mode = Major
     // Pentatonic and Yu mode = Minor Pentatonic above, so only the three
@@ -4125,14 +4129,14 @@ const ScaleDef SCALES[]={
     {"Hungarian Major",   8,{0,3,4,6,7,9,10},      7},
 };
 constexpr int NUM_SCALES = sizeof(SCALES)/sizeof(SCALES[0]);
-int currentScaleIndex = 0; // index into SCALES[]; default = Chromatic. Only relevant in Pro Mode — EZ always uses MAJOR_SCALE.
+int currentScaleIndex = 0; // index into SCALES[]; default = Chromatic. Only relevant in Pro Mode â€” EZ always uses MAJOR_SCALE.
 
 enum class PlayMode : uint8_t { EZ, PRO };
 PlayMode playMode = PlayMode::EZ;
 
 // How many octaves to shift Row 2 down. Uses floor division so Row 2
 // starts as high as possible while still landing a full octave (or more)
-// below Row 1 — this favors a wider combined range and allows a bit of
+// below Row 1 â€” this favors a wider combined range and allows a bit of
 // overlap at the boundary, rather than guaranteeing zero overlap at the
 // cost of a gap of unplayable notes in between (which is worse for
 // actually playing songs that span more than an octave).
@@ -4171,16 +4175,16 @@ void recomputeKeyNotes(){
 // "PAD" control for the missing IMU (see updatePadVirtualAxes()).
 bool isCardputerAdv = true;
 uint16_t seqAccentColor = 0xFD20; // placeholder; recomputed properly in setup() via color565(255,140,0)
-uint16_t seqAccentNoteColor = 0xF800; // placeholder red; recomputed in setup() — accented steps' velocity bar
-// Dimmed fills for the step bars only — see setup() (v0.9925).
+uint16_t seqAccentNoteColor = 0xF800; // placeholder red; recomputed in setup() â€” accented steps' velocity bar
+// Dimmed fills for the step bars only â€” see setup() (v0.9925).
 uint16_t seqBarNormal = 0xE71C, seqBarAccent = 0xA97F, seqBarPlayhead = 0x47F0;
-uint16_t songAccentColor = 0x07FF; // placeholder cyan; recomputed in setup() — SONG mode's own fixed UI color, distinct from PLAY's green and SEQ's orange
+uint16_t songAccentColor = 0x07FF; // placeholder cyan; recomputed in setup() â€” SONG mode's own fixed UI color, distinct from PLAY's green and SEQ's orange
 
 // ---- UI theme (v0.9936) ----
 //
 // A theme sets the accent colour for all THREE home modes at once, not one
 // colour. That is deliberate. uiColor is not purely decorative: PLAY, SEQ
-// and SONG are told apart by it, and that identification is load-bearing —
+// and SONG are told apart by it, and that identification is load-bearing â€”
 // it is how the v0.9922 "SEQ's orange left behind in PLAY" bug was spotted
 // at all. Letting someone pick three arbitrary colours would let them pick
 // three similar ones and quietly lose it.
@@ -4192,8 +4196,8 @@ uint16_t songAccentColor = 0x07FF; // placeholder cyan; recomputed in setup() �
 // release, in someone else's hands.
 //
 // What a theme does NOT touch: the sequencer's step colours, the level-bar
-// colours, cursor white. Those carry meaning rather than decoration — beat
-// position, accent, playhead — and took six versions to get right. They
+// colours, cursor white. Those carry meaning rather than decoration â€” beat
+// position, accent, playhead â€” and took six versions to get right. They
 // stay fixed.
 struct UiTheme {
     const char *name;
@@ -4206,14 +4210,14 @@ const UiTheme UI_THEMES[]={
     {"Classic",   0,255,  0,   255,140,  0,     0,220,220},
     // Requested: red for PLAY. SEQ moves to amber and SONG to violet so
     // all three stay apart.
-    // Crimson rather than the vermilion this started as — dropping green
+    // Crimson rather than the vermilion this started as â€” dropping green
     // to near zero is what makes red read as deep instead of orange-ish.
     {"Ember",   225,  0, 35,   255,180,  0,   190,110,255},
     // Ice moved away from Access's blue: teal-leaning rather than
     // blue-leaning, so the two themes are not mistaken for each other.
     {"Ice",      90,225,235,   190,130,255,   120,150,255},
     // Brightness-separated rather than hue-separated, so it reads for
-    // anyone regardless of colour perception — and in bright sunlight.
+    // anyone regardless of colour perception â€” and in bright sunlight.
     {"Mono",    255,255,255,   170,170,170,   110,110,110},
     // Blue / yellow / white avoids the red-green axis entirely, which is
     // what the common forms of colour vision deficiency affect. The three
@@ -4231,7 +4235,7 @@ bool uiThemeDirty=false;   // set on change, consumed by loop()'s redraw latch
 //
 // Real analog synths do not hold still: oscillators wander a few cents,
 // filters breathe, levels creep. This reproduces that, and it fits this
-// codebase without any new machinery — base values and EFFECTIVE values
+// codebase without any new machinery â€” base values and EFFECTIVE values
 // are already separate everywhere (the *Offset pairs, the fxEff* set), so
 // drift is just one more offset. The menus keep showing the base value,
 // which is what was asked for and also what a real synth's panel does: the
@@ -4250,7 +4254,7 @@ float driftPitchT=0.f,driftCutoffT=0.f,driftLevelT=0.f;// walk targets
 // Full-scale drift at amount 1.0. Pitch is the one that has to stay
 // modest: past a few cents it stops sounding like an old synth and starts
 // sounding out of tune. Cutoff can take much more before it reads as
-// wrong, and level least of all — amplitude wobble is the most obviously
+// wrong, and level least of all â€” amplitude wobble is the most obviously
 // artificial of the three.
 // Raised in v0.9942 after measuring what the walk actually produced.
 // The peak was fine at 9 cents, but the walk only reached it occasionally:
@@ -4275,7 +4279,7 @@ void updateAnalogDrift(){
     // New target occasionally; the smoothing below does the travelling, so
     // what comes out is a slow wander rather than a jitter.
     // Retuned in v0.9942. Targets are picked LESS often and travelled
-    // toward FASTER than before — the old pair (3% per buffer, 0.010) let
+    // toward FASTER than before â€” the old pair (3% per buffer, 0.010) let
     // a new target arrive long before the previous one was reached, so the
     // value spent its life crawling around the middle and never got near
     // the range it was allowed. Simulation over 300k buffers: RMS went
@@ -4304,15 +4308,15 @@ bool prevThemeConfirmPressed=false,prevThemeTabPressed=false;
 // then be unable to see well enough to undo.
 constexpr uint8_t UI_BRIGHT_MIN=32, UI_BRIGHT_MAX=255;
 uint8_t uiBrightness=UI_BRIGHT_MAX;
-// Deferred during boot (v0.99986) — a saved brightness preference (dim
+// Deferred during boot (v0.99986) â€” a saved brightness preference (dim
 // or otherwise) used to take effect the moment loadSettings() parsed it,
 // which lands squarely in the middle of the splash's own fade-in,
 // undercutting it with an abrupt jump to whatever level the user last
-// saved — jarring in either direction, and specifically defeating the
+// saved â€” jarring in either direction, and specifically defeating the
 // point of a deliberately gentle fade if that saved level is dim. While
 // this is true, applyUiBrightness() updates uiBrightness's bookkeeping
 // as normal but skips the actual hardware call; setup() clears it and
-// applies the real value exactly once, right before entering loop() —
+// applies the real value exactly once, right before entering loop() â€”
 // i.e. right as PLAY actually appears, which is the moment being asked
 // for.
 bool bootBrightnessDeferred=true;
@@ -4328,7 +4332,7 @@ void applyUiTheme(){
     seqAccentColor =M5Cardputer.Display.color565(t.seqR ,t.seqG ,t.seqB );
     songAccentColor=M5Cardputer.Display.color565(t.songR,t.songG,t.songB);
 }
-uint16_t uiColor = GREEN; // the "current" UI accent color — GREEN normally, seqAccentColor whenever SEQ is the active home mode (see loop())
+uint16_t uiColor = GREEN; // the "current" UI accent color â€” GREEN normally, seqAccentColor whenever SEQ is the active home mode (see loop())
 
 // ---------------------------------------------------------
 // IMU mapping
@@ -4338,13 +4342,13 @@ enum class ImuTarget : uint8_t {
     VOLUME, PITCH_BEND, BEND_UP, BEND_DOWN, BITCRUSH, FILTER_CUTOFF,
     SHAPE, DETUNE, NOISE, SUB_LEVEL, RESONANCE, LFO_RATE, LFO_DEPTH,
     ARP_TEMPO, ARP_SWING,
-    // FX targets (v0.9876). APPENDED, never inserted — the numeric value
+    // FX targets (v0.9876). APPENDED, never inserted â€” the numeric value
     // is what settings.json stores, so inserting anywhere above would
     // silently re-point every existing saved IMU mapping.
     FX_RING_RATE, FX_RING_MIX, FX_LIMIT_DRIVE,
     FX_CHORUS_DEPTH, FX_CHORUS_MIX, FX_DELAY_FB, FX_DELAY_MIX,
     FX_REVERB_ROOM, FX_REVERB_MIX,   // v0.9879
-    // v0.9934. Appended, never inserted — settings.json stores these
+    // v0.9934. Appended, never inserted â€” settings.json stores these
     // numerically, so anything above would re-point saved mappings.
     OSC_MIX, OSC2_SHAPE,
     TARGET_COUNT
@@ -4374,7 +4378,7 @@ struct ImuAxisConfig {
 // holding the device at an angle can drop it to silence, which a
 // first-time user reads as broken hardware rather than as a control
 // working exactly as configured. Shape always leaves the sound audible.
-// These must stay in sync with performPatchToneReset()'s IMU section —
+// These must stay in sync with performPatchToneReset()'s IMU section â€”
 // the two had drifted apart before v0.9875 (first boot said Vibrato
 // Depth here, Patch Reset said Volume), so the same firmware behaved
 // differently depending on which path you arrived through.
@@ -4382,7 +4386,7 @@ ImuAxisConfig imuAxisX = { ImuTarget::TIMBRE, 1.0f, false, false, false, 0.0f, 0
 ImuAxisConfig imuAxisY = { ImuTarget::SHAPE,  1.0f, false, false, false, 0.0f, 0.0f };
 
 // Raw tilt angle (degrees, before calibration offset) from the most recent
-// updateImu() call — used by the Calibrate action to capture a new zero point.
+// updateImu() call â€” used by the Calibrate action to capture a new zero point.
 float lastAngleXDeg=0.f, lastAngleYDeg=0.f;
 
 constexpr float TILT_MAX_DEGREES = 35.0f;
@@ -4399,7 +4403,7 @@ struct SynthParams {
     float fineTuneCents = 0.0f;
     // VCO 2 (v0.9911). A full second oscillator: its own position in the
     // Morph chain, its own Shape, its own tuning. It shares the chain
-    // itself, the filter, the envelope and the VCA — those are one signal
+    // itself, the filter, the envelope and the VCA â€” those are one signal
     // path, and duplicating them would be a second voice rather than a
     // second oscillator.
     //
@@ -4414,11 +4418,11 @@ struct SynthParams {
     // Semitone offset (v0.993): the interval control the tuning section
     // was missing. Octave is too coarse for harmony and Detune is measured
     // in cents, so a third or a fifth could only be dialled in as 400 or
-    // 700 cents on a +-50 control — which is to say, not at all.
+    // 700 cents on a +-50 control â€” which is to say, not at all.
     int   osc2Semitones   = 0;    // -12..+12
     // v0.9934: both reachable from the IMU. Osc Mix is deliberately
-    // bipolar — tilting one way brings oscillator 1 forward, the other
-    // brings oscillator 2 — so it crossfades rather than just fading
+    // bipolar â€” tilting one way brings oscillator 1 forward, the other
+    // brings oscillator 2 â€” so it crossfades rather than just fading
     // something in.
     float osc2LevelOffset=0.0f,      osc2LevelOffsetTarget=0.0f;   // -1..+1
     float osc2ShapeOffset=0.0f,      osc2ShapeOffsetTarget=0.0f;   // -1..+1
@@ -4426,7 +4430,7 @@ struct SynthParams {
     // the Morph chain (v0.9914). The chain exists so IMU and LFO can sweep
     // continuously between waveforms; oscillator 2 is a fixed layer and
     // never needs that, so being restricted to whatever happens to be in
-    // the chain only cost it reach — the whole 12-waveform library is
+    // the chain only cost it reach â€” the whole 12-waveform library is
     // available here instead. Simpler too: one table pair, no morph
     // interpolation.
     OscWaveform osc2Waveform = OscWaveform::SAWTOOTH;
@@ -4457,7 +4461,7 @@ struct SynthParams {
     // v0.989: Vibrato/Tremolo/Bit-crusher moved to the base+offset model
     // every other modulatable parameter here uses. They used to have the
     // IMU write their value DIRECTLY, which is why they could only ever be
-    // set by tilt — a menu control would just have been overwritten on the
+    // set by tilt â€” a menu control would just have been overwritten on the
     // next IMU update. The menu now owns the base value and the IMU adds
     // an offset on top, so both work at once.
     float vibratoDepthOffset=0.0f,  vibratoDepthOffsetTarget=0.0f;  // +-1.0
@@ -4473,7 +4477,7 @@ struct SynthParams {
     float subLevelOffsetTarget  = 0.0f;
     float resonanceOffsetTarget = 0.0f;
     // FX (v0.987): Ring Modulator. Mix=0 means fully off (no separate
-    // enabled flag needed) — kept simple for this first FX delivery, no
+    // enabled flag needed) â€” kept simple for this first FX delivery, no
     // IMU offset yet (can follow later using the same offset pattern as
     // everything else here, once wanted).
     float ringModRateHz = 200.0f; // 20-2000 Hz
@@ -4497,7 +4501,7 @@ struct SynthParams {
     // pattern every other IMU/LFO-mappable parameter here uses: the menu
     // value is never written to, the offset is added on top and clamped
     // back into the parameter's own range by updateFxEffective().
-    // Only the seven parameters worth performing with are covered — see
+    // Only the seven parameters worth performing with are covered â€” see
     // the note above updateFxEffective() for why Delay Time in particular
     // is deliberately not one of them.
     float ringModRateOffset=0.0f,   ringModRateOffsetTarget=0.0f;   // +-990 Hz
@@ -4524,27 +4528,27 @@ struct SynthParams {
 // performance rather than a pause in it.
 //
 // A slot holds a full snapshot, captured once when the slot is assigned
-// and kept in RAM. Nothing touches the SD card while morphing — reads
+// and kept in RAM. Nothing touches the SD card while morphing â€” reads
 // block just as writes do, and that has interfered with audio twice in
 // this project already (v0.9913, v0.9926).
 struct PatchSnapshot {
     bool used=false;
     char name[24]={0};
     SynthParams p;            // every continuous tone parameter
-    // Discrete state, which cannot be interpolated — see morphApply().
+    // Discrete state, which cannot be interpolated â€” see morphApply().
     OscWaveform chain[MAX_MORPH_SLOTS];
     int   chainLen;
     OscWaveform osc2Wave;
     int   osc2Oct,osc2Semi,subOct;
     // IMU mapping (v0.9954). A patch stores which parameter each axis
-    // drives, so morphing to a patch has to take that with it — otherwise
+    // drives, so morphing to a patch has to take that with it â€” otherwise
     // the sound changes but tilting still does whatever the previous patch
     // said, which is the opposite of loading that patch. Discrete, so it
     // switches at the start along with the waveforms.
     uint8_t imuXTarget,imuYTarget;
     bool    imuXEn,imuYEn;
     // LFO (v0.99874). It was missing entirely, so morphing changed the
-    // tone but left the modulation from the previous patch running — the
+    // tone but left the modulation from the previous patch running â€” the
     // LFO is as much a part of a sound as the filter is. Wave and target
     // are discrete and switch at the start with the waveforms; rate and
     // depth interpolate.
@@ -4559,12 +4563,12 @@ constexpr int NUM_MORPH_SLOTS=10;
 //
 // This was written to use PSRAM, but there is none: both boards run an
 // ESP32-S3FN8, and ps_calloc() simply fell through to ordinary calloc.
-// Keeping the heap allocation anyway, for the one thing it does buy —
+// Keeping the heap allocation anyway, for the one thing it does buy â€”
 // morphing disables itself cleanly if the memory is not there, instead of
 // the array existing unconditionally and squeezing the card mount.
 //
 // These snapshots are several KB, and internal DRAM here is already very
-// heavily committed — the reverb network alone is ~50KB of float and the
+// heavily committed â€” the reverb network alone is ~50KB of float and the
 // delay line ~70KB. SD.begin() allocates its own buffers from what is
 // left, so a static array here does not merely use memory, it can push
 // the card mount over the edge; a failed mount then reads as "every
@@ -4597,7 +4601,7 @@ void morphTick();
 
 // Morph-slot assignment screen (v0.995). Its own screen rather than an
 // addition to the patch bank: the bank exists for saving and loading, and
-// this is a separate idea — ten sounds you move BETWEEN while playing.
+// this is a separate idea â€” ten sounds you move BETWEEN while playing.
 // Keeping it separate also makes "which patches are cached in RAM" an
 // explicit list rather than something implied by the bank's contents.
 bool morphSlotScreenOpen=false;
@@ -4615,15 +4619,15 @@ unsigned long morphIncHeldMs=0,morphIncLastMs=0;
 unsigned long morphDecHeldMs=0,morphDecLastMs=0;
 bool menuKeyFire(bool now,bool prev,unsigned long &heldMs,unsigned long &lastMs);
 // Declared here, not down with the rest of updateMenuNavigation()'s own
-// state, because updateSeqEditing() and updateSongEditor() — both
-// defined before that point in the file — now use them too (v0.9996x
+// state, because updateSeqEditing() and updateSongEditor() â€” both
+// defined before that point in the file â€” now use them too (v0.9996x
 // fix, build error: "not declared in this scope"). menuKeyFire() itself
 // was already safely callable from anywhere via the forward declaration
 // above; these are the actual storage it reads and writes, which has no
 // such forward-visibility shortcut.
 unsigned long menuIncHeldMs=0,menuIncLastMs=0;
 unsigned long menuDecHeldMs=0,menuDecLastMs=0;
-// menuUpHeldMs/menuDownHeldMs moved here too (v0.9996x, second fix) —
+// menuUpHeldMs/menuDownHeldMs moved here too (v0.9996x, second fix) â€”
 // same forward-visibility problem as menuIncHeldMs above, just caught a
 // build later: SEQ's and SONG's Tempo/Swing use these (the pair that
 // actually shares ';'/'.' with vInc/vDec and left/right), and both
@@ -4645,12 +4649,12 @@ float seqVelocityMult = 1.0f; // per-step velocity multiplier while the Sequence
 // user has Portamento on or off elsewhere.
 bool  seqSliding=false;
 float seqSlideFreq=0.f;
-constexpr float SEQ_SLIDE_SPEED=0.35f; // per-buffer smoothing coeff — tuned so the glide clearly completes within roughly one step
+constexpr float SEQ_SLIDE_SPEED=0.35f; // per-buffer smoothing coeff â€” tuned so the glide clearly completes within roughly one step
 // Accent: temporary filter cutoff + resonance boost, smoothed like other offsets.
 float seqAccentCutoffBoost=0.f, seqAccentCutoffBoostTarget=0.f;
 float seqAccentResoBoost=0.f, seqAccentResoBoostTarget=0.f;
 constexpr float SEQ_ACCENT_CUTOFF_BOOST=3500.0f; // Hz, added while an accented step is sounding
-constexpr float SEQ_ACCENT_RESO_BOOST=4.0f;      // Q, added while an accented step is sounding — the classic TB-303 "quack"
+constexpr float SEQ_ACCENT_RESO_BOOST=4.0f;      // Q, added while an accented step is sounding â€” the classic TB-303 "quack"
 constexpr float SEQ_ACCENT_VELOCITY_MULT=1.3f;   // velocity multiplier for accented steps
 
 // ---------------------------------------------------------
@@ -4686,12 +4690,12 @@ bool prevHelpPressed = false;
 // Edge detection
 bool prevOctaveUpPressed = false, prevOctaveDownPressed = false;
 bool prevVolumeUpPressed = false, prevVolumeDownPressed = false;
-// Dedicated, not shared with anything else (v0.9996x) — deliberately NOT
+// Dedicated, not shared with anything else (v0.9996x) â€” deliberately NOT
 // reusing menuUpHeldMs/menuDownHeldMs or menuIncHeldMs/menuDecHeldMs the
 // way an earlier attempt at ARP/SEQ/SONG's Tempo/Swing wrongly did: 'k'
 // and 'l' are their own physical keys, not aliases for any of ';'/'.'/
 // '/'/',', so sharing here would create exactly the same false-reset bug
-// that fix had to correct — updateMenuNavigation()'s per-frame "clear if
+// that fix had to correct â€” updateMenuNavigation()'s per-frame "clear if
 // not held" logic watches a different key entirely and would zero these
 // out from under a genuinely-held 'k'/'l' on the very next frame.
 unsigned long volUpHeldMs=0,volUpLastMs=0;
@@ -4707,14 +4711,14 @@ float phase        = 0.0f;
 float phase2       = 0.0f;   // v0.9911: oscillator 2
 float subPhase     = 0.0f; // independent phase accumulator for the sub oscillator
 float ringModPhase = 0.0f; // independent phase accumulator for the Ring Modulator carrier (v0.987)
-// Chorus (v0.9873): circular delay-line buffer, ~46ms at 44100Hz — well
+// Chorus (v0.9873): circular delay-line buffer, ~46ms at 44100Hz â€” well
 // over the ~10-30ms range the modulated delay read actually sweeps
 // through, so there's no risk of the read/write positions colliding.
 constexpr int CHORUS_BUFFER_SIZE = 2048;
 int16_t chorusBuffer[CHORUS_BUFFER_SIZE] = {0};
 int   chorusWriteIdx  = 0;
 float chorusLfoPhase  = 0.0f;
-// Smoothed chorus read distance in samples (v0.9877) — see applyChorus().
+// Smoothed chorus read distance in samples (v0.9877) â€” see applyChorus().
 // Seeded to the middle of the default sweep (10 + 15*0.5 ms) so the first
 // buffer after boot starts from a sane distance rather than sliding in
 // from zero.
@@ -4722,7 +4726,7 @@ float chorusDelaySmooth = 17.5f*0.001f*SAMPLE_RATE;
 // Chorus wet-path re-entry state (v0.9878). When the chorus line is empty
 // and a note starts, the read pointer spends the first delay-time worth of
 // samples inside the empty region and then crosses into the freshly
-// recorded note in a single sample — the wet signal jumps from silence to
+// recorded note in a single sample â€” the wet signal jumps from silence to
 // the note's full attack at once, which is a click. chorusFillCount tracks
 // how much real audio has been written since the line was last empty, and
 // chorusWetGain holds the wet path at zero until the read pointer has
@@ -4737,7 +4741,7 @@ float chorusWetGain   = 1.0f;
 //
 // This was 800ms, costing 35280 int16 = ~70KB of internal DRAM. Halving it
 // frees ~35KB, which is what makes room for the TinyUSB stack (measured at
-// ~19KB) alongside SD.begin (~27KB) — the two together did not fit before
+// ~19KB) alongside SD.begin (~27KB) â€” the two together did not fit before
 // and the board would not boot.
 //
 // It is a real loss, not a free win: 400ms is short for anything you would
@@ -4747,7 +4751,7 @@ constexpr float DELAY_MAX_MS = 800.0f;
 constexpr int DELAY_BUFFER_SIZE = (int)(DELAY_MAX_MS*0.001f*SAMPLE_RATE)+64;
 int16_t delayBuffer[DELAY_BUFFER_SIZE] = {0};
 int delayWriteIdx = 0;
-// Reverb (v0.9879): Schroeder/Freeverb topology — 8 parallel comb filters
+// Reverb (v0.9879): Schroeder/Freeverb topology â€” 8 parallel comb filters
 // (each with a one-pole lowpass in its feedback path, which is what
 // Damping controls) summed, then 4 allpass filters in series to smear the
 // result into something that stops sounding like discrete echoes. These
@@ -4758,7 +4762,7 @@ int delayWriteIdx = 0;
 // feedback runs around 0.84, so anything living in the buffer is
 // recirculated with a steady-state gain of ~1/(1-0.84) = 6x, and eight of
 // them sum on top of that. int16 quantization noise would come back at
-// roughly -65dBFS — a faint but real hiss under quiet passages, which is
+// roughly -65dBFS â€” a faint but real hiss under quiet passages, which is
 // exactly where a reverb tail is most exposed. The cost is 12587 floats
 // (~50KB) instead of ~25KB; ESP32-S3 has the room.
 constexpr int NUM_REVERB_COMBS    = 8;
@@ -4777,9 +4781,9 @@ int   reverbApIdx[NUM_REVERB_ALLPASS]={0,0,0,0};
 // Pitch-ratio (2^(cents/1200)) block-rate optimization: powf() is
 // expensive to call every single sample (44100x/sec). Recomputing it
 // only every PITCH_RATIO_UPDATE_INTERVAL samples and linearly
-// interpolating in between is inaudible — that's still an ~11kHz
+// interpolating in between is inaudible â€” that's still an ~11kHz
 // update rate, far above any audible vibrato/LFO modulation rate (max
-// 20Hz) — while cutting the powf() call count by that same factor.
+// 20Hz) â€” while cutting the powf() call count by that same factor.
 float pitchRatioCur  = 1.0f;
 float pitchRatioStep = 0.0f;
 constexpr int PITCH_RATIO_UPDATE_INTERVAL = 4;
@@ -4863,7 +4867,7 @@ float filterY1=0.f,filterY2=0.f;
 // (those remain hard-wired to pitch / volume via the IMU mapping system).
 // It can be routed to one destination at a time.
 enum class LfoWave : uint8_t { SINE, TRIANGLE, SAWTOOTH, SQUARE, SAMPLE_HOLD };
-// FX entries appended (v0.9876), never inserted — lfo_target is stored
+// FX entries appended (v0.9876), never inserted â€” lfo_target is stored
 // numerically in settings.json, same reasoning as ImuTarget above.
 enum class LfoTarget : uint8_t { NONE, PITCH, VOLUME, TIMBRE, FILTER, SHAPE,
     FX_RING_RATE, FX_RING_MIX, FX_LIMIT_DRIVE,
@@ -4933,8 +4937,8 @@ const char *lfoTargetName(LfoTarget t){
 // Reusing the oscillator tables keeps the LFO shapes consistent with
 // the VCO waveform morph and avoids allocating separate tables.
 // Sample & Hold LFO's currently-held value. Updated in exactly one
-// place — the main per-sample audio loop, right when the LFO's phase
-// wraps to a new cycle (see audioTask) — so every other reader
+// place â€” the main per-sample audio loop, right when the LFO's phase
+// wraps to a new cycle (see audioTask) â€” so every other reader
 // (the once-per-buffer filter-cutoff calculation, the LFO screen's
 // waveform preview) can safely sample it via lfoTableSample() without
 // ever disturbing the real audio-rate sequence.
@@ -4946,7 +4950,7 @@ float lfoTableSample(LfoWave w,int idx){
         case LfoWave::TRIANGLE:    return triangleTable[idx]/TRIANGLE_AMP;
         case LfoWave::SAWTOOTH: {
             // Clean/naive formula, not the oscillator's band-limited
-            // sawtoothTable — LFO rates (0.1-20Hz) are nowhere near audio
+            // sawtoothTable â€” LFO rates (0.1-20Hz) are nowhere near audio
             // rates, so anti-aliasing buys nothing here, while the
             // truncated-harmonic-series ripple (Gibbs phenomenon) near
             // the wrap would otherwise show up as a visibly wavy curve
@@ -4983,7 +4987,7 @@ struct SettingItem {
     const char *(*valueLabel)();
     // Which modulation targets, if any, drive this parameter (v0.9903).
     // Lets drawItemList() mark a row when an IMU axis or the LFO is
-    // actually pointing at it — until now a menu showed its base value and
+    // actually pointing at it â€” until now a menu showed its base value and
     // nothing else, so a parameter being modulated was invisible and the
     // sound appeared to change on its own.
     //
@@ -5019,13 +5023,13 @@ bool saveSettings(); // forward declaration
 //
 // This replaces a save/overwrite/restore dance that used to write the
 // dynamic value directly into filterParams.cutoffHz/resonanceQ, call this
-// function, then write the saved value back — a real window, however
+// function, then write the saved value back â€” a real window, however
 // brief, during which those shared fields held an ENVELOPE-INFLATED value
 // rather than the patch's true one. morphCapture() (loop(), the other
 // core) reads those same fields with no synchronisation, and landing in
 // that window meant a same-patch re-morph would sweep from whatever the
 // envelope happened to be doing at that exact instant back down to the
-// patch's real value over the whole morph duration — heard as a phaser,
+// patch's real value over the whole morph duration â€” heard as a phaser,
 // worst on patches with a large filter envelope depth (Lead, Bass, Brass,
 // Pluck) since that is exactly what made the captured value most
 // different from the true one. Not writing the shared fields at all
@@ -5061,7 +5065,7 @@ int16_t applyFilter(int16_t in){
 // Splash screen (v0.9998)
 // ==========================================================
 // The logo mark is a ring with a crosshair reaching to its edge, evoking
-// the IMU X/Y axis control this synth is built around — the same visual
+// the IMU X/Y axis control this synth is built around â€” the same visual
 // language as the project's actual logo artwork. Built once into a small
 // square sprite (splashLogo, declared as a global above) so the boot
 // animation can rotate the WHOLE mark as one unit via pushRotateZoom(),
@@ -5070,27 +5074,27 @@ int16_t applyFilter(int16_t in){
 //
 // Sequence: the mark starts tilted, as if the device had just been
 // picked up, and settles level over ~900ms with an ease-out curve (fast
-// start, gentle stop) — the one-shot version of the exponential-approach
+// start, gentle stop) â€” the one-shot version of the exponential-approach
 // shape used for smoothing elsewhere in this file (portamento, IMU
 // offsets, etc.), just driven by elapsed wall-clock time instead of a
 // per-buffer smoothing constant, since this runs once, not continuously.
 // Once level, the subtitle/version/credit lines appear and buildWaveTables()
 // + the SD mount (both already slow enough to want covering) run while
-// all of it stays on screen — this call sits exactly where the old
+// all of it stays on screen â€” this call sits exactly where the old
 // single-line boot text used to, right before those two calls, so it
 // still serves the same "please wait" purpose it always did, just with
 // more to look at.
 //
-// vTaskDelay(1) between animation frames, not delay() — this project's
+// vTaskDelay(1) between animation frames, not delay() â€” this project's
 // own hard-won rule (see the delay()-removal history around v0.99956-57)
 // is specifically about avoiding delay() inside loop()'s input-handling
 // path, where it let another task's state changes go unnoticed mid-call.
 // Neither risk applies here: this runs once in setup(), before loop()
 // exists and before any input handling is possible, so a short blocking
-// wait is exactly as safe as it looks — vTaskDelay(1) is used anyway,
+// wait is exactly as safe as it looks â€” vTaskDelay(1) is used anyway,
 // simply because yielding to the scheduler for free is never worse than
 // a bare spin-wait.
-// Split in two (v0.9998, hardware-tested fix — see below).
+// Split in two (v0.9998, hardware-tested fix â€” see below).
 //
 // drawSplashBootText() is the cheap, immediate part: plain text, no
 // sprite allocation, no repeated drawing. Called early, in the exact
@@ -5100,23 +5104,23 @@ int16_t applyFilter(int16_t in){
 //
 // drawSplashLogoAnimation() is the full rotating-logo experience, and is
 // now called AFTER initSDCard() instead of before it. A real-hardware
-// test found the SD card failing to mount with the original ordering —
+// test found the SD card failing to mount with the original ordering â€”
 // this project has hit exactly this class of bug before (see the
 // v0.99953-54 history: a diagnostic struct gaining a few float fields
 // shifted memory layout enough to break the mount, with no full
 // explanation ever found, just a correlation strong enough to make
 // reverting the safe fix). canvas/canvasTop/canvasName/canvasImu/
-// canvasNav — five more M5Canvas sprites — already get allocated before
+// canvasNav â€” five more M5Canvas sprites â€” already get allocated before
 // the SD mount without issue, so simply creating a sprite here isn't
 // itself the likely trigger; what's genuinely new is the sustained,
 // repeated pushRotateZoom() activity across dozens of frames over
 // ~900ms, a pattern nothing else in setup() does. Rather than trying to
-// prove which part is responsible, the whole animation — sprite
-// creation included — moves to run after the SD mount has already
+// prove which part is responsible, the whole animation â€” sprite
+// creation included â€” moves to run after the SD mount has already
 // succeeded or failed, matching the same conservative fix this project
 // already has a precedent for.
 void drawSplashBootText(){
-    // Text removed (v0.99984), on request — the old single-line message
+    // Text removed (v0.99984), on request â€” the old single-line message
     // was only ever meant as a "something is happening" placeholder for
     // the SD-mount window before the real splash existed; now that the
     // real splash follows shortly after, having this flash briefly first
@@ -5127,27 +5131,27 @@ void drawSplashBootText(){
 
 void drawSplashLogoAnimation(){
     splashLogo.setColorDepth(16);
-    splashLogo.setPsram(true);
-    // 80x80 -> 75x75 (v0.99988) — this time sized against a real number
+    splashLogo.setPsram(CPS_USE_PSRAM);
+    // 80x80 -> 75x75 (v0.99988) â€” this time sized against a real number
     // instead of another guess: the previous failure's diagnostic log
     // reported free heap 24,528 with the LARGEST CONTIGUOUS BLOCK only
-    // 11,764 of that — the heap is fragmented after SD.begin(), not
+    // 11,764 of that â€” the heap is fragmented after SD.begin(), not
     // simply short on total free memory, so the ceiling that actually
     // matters is the block size, not the free-heap figure. 80x80x16bpp
     // (12,800 bytes) exceeded that block by just over 1,000 bytes, which
     // is exactly why it failed while smaller sizes hadn't. 75x75x16bpp is
-    // 11,250 bytes — about 500 bytes of margin under the measured
+    // 11,250 bytes â€” about 500 bytes of margin under the measured
     // ceiling, since fragmentation can vary slightly boot to boot and
     // 76x76 (11,552) would leave almost none. Bigger than this would
     // need addressing the fragmentation itself, a different problem than
     // picking a larger number.
     bool logoOk=splashLogo.createSprite(75,75);
     if(!logoOk){
-        // Diagnostic, not a silent fallback (v0.99981) — the previous
+        // Diagnostic, not a silent fallback (v0.99981) â€” the previous
         // version had no visibility into WHY this failed on real
         // hardware beyond "it did"; this gives the next boot log an
         // actual number to look at instead of another guess.
-        Serial.printf("[Splash] logo sprite alloc FAILED — free heap %u, largest block %u\n",
+        Serial.printf("[Splash] logo sprite alloc FAILED â€” free heap %u, largest block %u\n",
             (unsigned)ESP.getFreeHeap(),(unsigned)ESP.getMaxAllocHeap());
     }
     if(logoOk){
@@ -5161,7 +5165,7 @@ void drawSplashLogoAnimation(){
         splashLogo.drawLine(cx-ringR,cy,cx+ringR,cy,ring); // edge to edge
         splashLogo.setTextColor(WHITE,BLACK);
         splashLogo.setTextSize(1);
-        splashLogo.drawString("CPS",cx-9,cy-4); // manually centered —
+        splashLogo.drawString("CPS",cx-9,cy-4); // manually centered â€”
         // this file never uses a text-datum API (setTextDatum etc. don't
         // appear anywhere else in it), so this keeps the same
         // hand-computed-offset convention as every other text draw here.
@@ -5171,7 +5175,7 @@ void drawSplashLogoAnimation(){
     // round and the staggered per-line reveal before that, on request:
     // the whole mark and all three text lines are drawn together as one
     // finished frame, dim, then the SCREEN BACKLIGHT itself ramps from
-    // dim to full via setBrightness() — the same call applyUiBrightness()
+    // dim to full via setBrightness() â€” the same call applyUiBrightness()
     // already uses elsewhere in this file, so nothing new or unproven is
     // being asked of the hardware here. This is cheaper than the
     // rotation it replaces (one brightness register write per step, no
@@ -5180,7 +5184,7 @@ void drawSplashLogoAnimation(){
     // in this feature so far has come from.
     M5Cardputer.Display.fillScreen(BLACK);
     const int logoCx=120, logoCy=55;
-    // UI_BRIGHT_MIN (32), not 0 — this project already treats 32 as the
+    // UI_BRIGHT_MIN (32), not 0 â€” this project already treats 32 as the
     // established minimum safe brightness (see its own definition
     // earlier in this file); starting the fade from an untested 0 isn't
     // worth it when a proven floor is right there.
@@ -5189,13 +5193,13 @@ void drawSplashLogoAnimation(){
     if(logoOk){
         splashLogo.pushSprite(logoCx-37,logoCy-37); // matches the plain
         // pushSprite(x,y) form canvas.pushSprite(0,0) already uses
-        // successfully throughout this file — both splashLogo and
+        // successfully throughout this file â€” both splashLogo and
         // canvas were constructed with &M5Cardputer.Display as their
         // parent, so neither needs (or should need) an explicit
         // destination argument.
     } else {
         // Fallback if the sprite failed to allocate (out of memory etc.)
-        // — at minimum still show readable text, matching the plain
+        // â€” at minimum still show readable text, matching the plain
         // single-line boot text this replaces.
         M5Cardputer.Display.setTextColor(uiColor,BLACK);
         M5Cardputer.Display.setTextSize(1);
@@ -5208,13 +5212,13 @@ void drawSplashLogoAnimation(){
     auto centerX=[&](const char*s){ return 120-(int)(strlen(s)*3); };
     M5Cardputer.Display.drawString("CARDPUTER SYNTH",centerX("CARDPUTER SYNTH"),100);
     M5Cardputer.Display.drawString("v1.0",centerX("v1.0"),114);
-    // Credit line removed (v0.99989), on request — read as too prominent
+    // Credit line removed (v0.99989), on request â€” read as too prominent
     // sitting right below the version. Just the mark, subtitle, and
     // version now.
     M5Cardputer.Display.endWrite();
 
     if(logoOk){
-        // Freed here (v0.99982) — the actual cause of a much more
+        // Freed here (v0.99982) â€” the actual cause of a much more
         // serious symptom than anything from the previous round: no
         // sound at all, with the boot log showing I2S DMA-buffer
         // allocation failing on a tight repeating loop the moment a key
@@ -5223,7 +5227,7 @@ void drawSplashLogoAnimation(){
         // canvasNav, ~130KB combined) already draw from the same small
         // internal-DRAM pool as everything else, including the I2S
         // driver's own DMA buffers. splashLogo was a GLOBAL M5Canvas
-        // that createSprite() had allocated but nothing ever freed — it
+        // that createSprite() had allocated but nothing ever freed â€” it
         // sat there permanently for the rest of the program's life,
         // taking its ~10KB out of circulation right when the speaker's
         // own driver needed to claim DMA-capable memory later in
@@ -5240,15 +5244,15 @@ void drawSplashLogoAnimation(){
     // finished screen is clearly readable for a total of close to 2
     // seconds, not just the fade itself.
     const uint8_t fadeTarget=uiBrightness; // the user's own configured
-    // level, not a hardcoded max — loadSettings() has not necessarily
+    // level, not a hardcoded max â€” loadSettings() has not necessarily
     // run yet at this point in setup(), so this may still be the
     // UI_BRIGHT_MAX default rather than a saved preference, but that is
     // no different from how the rest of the UI behaves before settings
     // load, and applyUiBrightness() corrects it again shortly after
     // regardless.
     // Slowed 900ms->1800ms and switched linear->smoothstep (v0.99985),
-    // on request — a linear ramp read as fast/abrupt on real hardware.
-    // Smoothstep (3p²-2p³) eases in and out at both ends of the fade
+    // on request â€” a linear ramp read as fast/abrupt on real hardware.
+    // Smoothstep (3pÂ²-2pÂ³) eases in and out at both ends of the fade
     // rather than changing brightness at a constant rate throughout,
     // which is the gentler curve being asked for.
     const unsigned long fadeMs=1800;
@@ -5280,13 +5284,13 @@ void buildWaveTables(){
     // number of harmonics instead of the naive linear-ramp/step formula.
     // A naive saw/square has (in principle) infinite harmonic content, so
     // on higher notes those upper harmonics exceed Nyquist and fold back
-    // as harsh, inharmonic aliasing noise — audibly worse the higher the
+    // as harsh, inharmonic aliasing noise â€” audibly worse the higher the
     // note. Building the table this way instead keeps every harmonic
     // that's actually in the table safely below the table's own Nyquist
     // (256 samples -> up to the 128th harmonic is representable; 20 is
     // comfortably inside that), trading a little brightness at extreme
     // octave-shifted-up notes for a noticeably cleaner sound everywhere
-    // else. This only runs once at boot — zero effect on audioTask's
+    // else. This only runs once at boot â€” zero effect on audioTask's
     // per-sample budget.
     constexpr int SAW_HARMONICS=20;
     constexpr int SQR_HARMONICS=19; // odd only below this, so ~10 actual partials
@@ -5303,7 +5307,7 @@ void buildWaveTables(){
         sqrBuf[i]=sqrSum;
         if(fabsf(sqrSum)>sqrPeak)sqrPeak=fabsf(sqrSum);
     }
-    // Normalize each to the existing amplitude constants, same as before —
+    // Normalize each to the existing amplitude constants, same as before â€”
     // downstream code (getMorphedSample, PWM blend, etc.) is unaffected.
     for(int i=0;i<WAVE_TABLE_SIZE;i++){
         sawtoothTable[i]=(int16_t)(sawBuf[i]/sawPeak*SAWTOOTH_AMP);
@@ -5312,7 +5316,7 @@ void buildWaveTables(){
 
     // Wavefolder (v0.983): drive a sine hard enough that it folds back on
     // itself (reflects rather than clips) several times per cycle,
-    // producing a rich, complex harmonic texture — classic "West Coast"
+    // producing a rich, complex harmonic texture â€” classic "West Coast"
     // synthesis character, distinct from the other four waveforms. Boot-
     // time only, same as everything else in this function.
     constexpr float WAVEFOLD_DRIVE=3.5f; // higher = more folds/richer harmonics
@@ -5327,7 +5331,7 @@ void buildWaveTables(){
     }
 
     // Half-Sine / rectified (v0.9831): only the positive half of a sine
-    // plays, the negative half is clamped to silence — a buzzy, reedy
+    // plays, the negative half is clamped to silence â€” a buzzy, reedy
     // character distinct from the other five. A true half-wave rectified
     // signal has a strong DC bias (its average isn't zero), which could
     // push a nonzero offset through the filter/mix downstream, so the
@@ -5388,7 +5392,7 @@ void buildWaveTables(){
         for(int i=0;i<WAVE_TABLE_SIZE;i++)sawtoothTableB[i]=(int16_t)(buf[i]/peak*SAWTOOTH_AMP);
     }
     // Square -> narrow pulse (~10% duty). This absorbs what PWM used to
-    // do — Square's own Shape=1 IS the narrow-pulse extreme, interpolated
+    // do â€” Square's own Shape=1 IS the narrow-pulse extreme, interpolated
     // continuously from the base 50%-duty Square at Shape=0.
     // Wavefolder -> more folds (higher drive than the Shape=0 table).
     {
@@ -5422,7 +5426,7 @@ void buildWaveTables(){
     }
 
     // Parabolic (v0.986): a smooth, rounded "arch" from -1 up to +1 and
-    // back down — like a Triangle with its sharp corners rounded off,
+    // back down â€” like a Triangle with its sharp corners rounded off,
     // giving fewer high harmonics and a softer, mellower character.
     for(int i=0;i<WAVE_TABLE_SIZE;i++){
         float t=float(i)/WAVE_TABLE_SIZE;
@@ -5430,7 +5434,7 @@ void buildWaveTables(){
         parabolicTable[i]=(int16_t)(y*PARABOLIC_AMP);
     }
 
-    // ESaw (v0.986): an exponential-curved Sawtooth — starts slow and
+    // ESaw (v0.986): an exponential-curved Sawtooth â€” starts slow and
     // accelerates through the cycle, instead of Sawtooth's constant-rate
     // linear ramp, giving it a distinctly different character despite
     // the shared "ramp then jump back" overall shape.
@@ -5446,7 +5450,7 @@ void buildWaveTables(){
         for(int i=0;i<WAVE_TABLE_SIZE;i++)esawTable[i]=(int16_t)(buf[i]/peak*ESAW_AMP);
     }
 
-    // Squeeze (v0.9862): a sine phase-distorted by itself — compresses
+    // Squeeze (v0.9862): a sine phase-distorted by itself â€” compresses
     // one side of the wave into a narrower span, expanding the other,
     // giving an asymmetric "squeezed" sine character.
     {
@@ -5461,7 +5465,7 @@ void buildWaveTables(){
         for(int i=0;i<WAVE_TABLE_SIZE;i++)squeezeTable[i]=(int16_t)(buf[i]/peak*SQUEEZE_AMP);
     }
 
-    // ESquare (v0.9862): a sine pushed through tanh — a smoothly-rounded
+    // ESquare (v0.9862): a sine pushed through tanh â€” a smoothly-rounded
     // square-like shape (no hard edges, so no additive-harmonic aliasing
     // concern), distinct in character from the additive-synthesis Square.
     {
@@ -5476,7 +5480,7 @@ void buildWaveTables(){
         for(int i=0;i<WAVE_TABLE_SIZE;i++)esquareTable[i]=(int16_t)(buf[i]/peak*ESQUARE_AMP);
     }
 
-    // Saw2 (v0.9862): an alternate Sawtooth character — sine phase-
+    // Saw2 (v0.9862): an alternate Sawtooth character â€” sine phase-
     // distorted by its own 2nd harmonic, giving a different asymmetric
     // ramp-like shape than either the additive-synthesis Sawtooth or ESaw.
     {
@@ -5491,7 +5495,7 @@ void buildWaveTables(){
         for(int i=0;i<WAVE_TABLE_SIZE;i++)saw2Table[i]=(int16_t)(buf[i]/peak*SAW2_AMP);
     }
 
-    // Square2 (v0.9862): an alternate Square character — combines the
+    // Square2 (v0.9862): an alternate Square character â€” combines the
     // same phase-distortion idea with the tanh waveshaper, giving a
     // squared-off shape with a subtly different asymmetry than ESquare.
     {
@@ -5586,14 +5590,14 @@ void buildWaveTables(){
 //
 // It used to be a crossfade between a 50%-duty band-limited square and a
 // hard-edged 10% pulse, which is not what a duty sweep is: mixing those two
-// gives their sum — a stepped, three-level waveform — rather than a square
+// gives their sum â€” a stepped, three-level waveform â€” rather than a square
 // of some intermediate width. On hardware that showed up as an obviously
 // wrong shape anywhere between the extremes.
 //
 // The table is rebuilt instead, using the identity that a pulse is the
 // difference of two sawtooths offset in phase by the pulse width:
 //   pulse(x, w) = saw(x) - saw(x - w)
-// Since sawtoothTable is already band-limited, so is the result — no extra
+// Since sawtoothTable is already band-limited, so is the result â€” no extra
 // aliasing, and no per-sample cost at all. Rebuilding 256 entries when the
 // value actually changes is also cheaper than 1024 extra lookups per buffer
 // would have been.
@@ -5604,7 +5608,7 @@ void buildWaveTables(){
 float squareDutyBuilt=-1.f;   // width currently in the table; -1 = never built
 // Oscillator 2 needs its OWN square table (v0.9935). Square's Shape is a
 // duty sweep baked into the table rather than a crossfade between two
-// tables, and there was only one table — rebuilt from oscillator 1's
+// tables, and there was only one table â€” rebuilt from oscillator 1's
 // Shape. So oscillator 2's Square ignored its own Shape entirely and
 // followed oscillator 1's instead, which is also why Square looked like
 // the one waveform that responded on the VCO 2 page: what was moving was
@@ -5617,7 +5621,7 @@ void buildSquareDuty(int16_t *dst,float &built,float shape){
     // This is the mapping the original PWM control had, restored after
     // hardware photos of the pre-Shape firmware showed it swept BOTH ways
     // around a symmetrical square at the mid point. v0.9891 only went one
-    // way — symmetrical at Shape 0, narrowing from there — so the wide
+    // way â€” symmetrical at Shape 0, narrowing from there â€” so the wide
     // side was unreachable and the default Shape of 0.5 landed on a 30%
     // pulse instead of a plain square. Linear across the whole knob rather
     // than clamping at 10/90, so there are no dead zones at either end.
@@ -5628,7 +5632,7 @@ void buildSquareDuty(int16_t *dst,float &built,float shape){
     if(w<1)w=1; if(w>=WAVE_TABLE_SIZE)w=WAVE_TABLE_SIZE-1;
     // Peak-to-peak is what is held constant (v0.9894), not peak. Earlier
     // versions normalized the peak, which meant the waveform visibly and
-    // audibly shrank as the width moved away from 50% — a pulse is
+    // audibly shrank as the width moved away from 50% â€” a pulse is
     // asymmetric about zero once it is DC-free, so holding the larger side
     // fixed lets the total span collapse. A real pulse wave keeps its span
     // and moves where zero sits inside it, which is what the pre-Shape
@@ -5637,8 +5641,8 @@ void buildSquareDuty(int16_t *dst,float &built,float shape){
     // The cost is headroom: at the 10%/90% extremes 90% of the span sits
     // on one side of zero, so the span has to be sized against that worst
     // case rather than against the symmetrical one. Sizing it so the
-    // extremes peak at 26000 — in line with ESQUARE_AMP, the loudest
-    // waveform here — puts the symmetrical square at about +/-14400 rather
+    // extremes peak at 26000 â€” in line with ESQUARE_AMP, the loudest
+    // waveform here â€” puts the symmetrical square at about +/-14400 rather
     // than the +/-18000 it had, roughly 1.9dB quieter. That is a fair
     // trade: it also makes the loudness change across a PWM sweep much
     // gentler (RMS varies 1.67x rather than 2.6x), which is what a sweep
@@ -5676,14 +5680,14 @@ int16_t getMorphedSample(int idx,float morph,float shape){
     // Shape interpolates each of the two morph-blended waveforms between
     // its own Shape=0/Shape=1 tables FIRST, then the morph blend runs on
     // top of the two already-shaped results. This is a uniform mechanism
-    // for every waveform in the library — it's what replaced the old
+    // for every waveform in the library â€” it's what replaced the old
     // Square-only PWM special case (Square's own Shape=1 table IS the
     // narrow-pulse extreme PWM used to produce).
     int hi=min(lo+1,morphChainLen-1);
     // Defensive: a null would mean refreshMorphTablePtrs() never ran for
     // this slot. Cheaper to check than to risk a crash inside audioTask.
     // refreshMorphTablePtrs() locks internally now (v0.99943), so the hot
-    // path above this — the overwhelming majority of calls — never pays
+    // path above this â€” the overwhelming majority of calls â€” never pays
     // for it; only this rare fallback does.
     if(!morphTblA[lo]||!morphTblA[hi])refreshMorphTablePtrs();
     int16_t sampleLo=(int16_t)(morphTblA[lo][idx]*(1-sh)+morphTblB[lo][idx]*sh);
@@ -5701,13 +5705,13 @@ int16_t nextNoise(){
 // v0.989: takes the precomputed quantization level count rather than the
 // raw amount. This used to call powf() on every single sample, which is
 // exactly what this file's own rule about expensive math in the per-sample
-// loop forbids — the amount can only change once per buffer, so the powf()
+// loop forbids â€” the amount can only change once per buffer, so the powf()
 // now happens there (see updateFxEffective) and this is left with a round
 // and two multiplies.
 int16_t applyBitcrush(int16_t s,float levels){
     if(levels<=0.f) return s;
     // Clamped before the cast (v0.9902). Rounding pushes values near full
-    // scale UP past it — at 4 levels an input of 30000 rounds to 32768,
+    // scale UP past it â€” at 4 levels an input of 30000 rounds to 32768,
     // one above int16's maximum, and the cast wraps it to -32768. A loud
     // note hit that on most peaks, turning the effect into a burst of
     // wrapped noise rather than the quantization it should be.
@@ -5717,7 +5721,7 @@ int16_t applyBitcrush(int16_t s,float levels){
     return (int16_t)q;
 }
 
-// Effective FX parameter values for the current buffer (v0.9876) — the
+// Effective FX parameter values for the current buffer (v0.9876) â€” the
 // menu value plus any IMU offset and LFO modulation, already clamped
 // back into each parameter's own range. The apply* functions below read
 // these rather than params.* directly, so modulation costs nothing in
@@ -5737,7 +5741,7 @@ float fxEffReverbDamp    = 0.2f;  // one-pole coefficient in the comb feedback
 float fxEffReverbMix     = 0.0f;
 // v0.989: Vibrato/Tremolo/Bit-crusher joined the same once-per-buffer
 // resolution. fxEffBitcrushLevels is the quantization step count, not the
-// amount — the powf() that derives it used to run per sample.
+// amount â€” the powf() that derives it used to run per sample.
 float fxEffVibratoDepth  = 0.0f;
 float fxEffVibratoRateHz = 5.0f;
 float fxEffTremoloDepth  = 0.0f;
@@ -5753,7 +5757,7 @@ float fxEffBitcrushLevels= 0.0f;
 // the read position a whole sample at a step and produce zipper noise,
 // and would also re-pitch the echoes already recirculating in the
 // buffer. Doing it properly needs fractional/interpolated reads like
-// Chorus already has — a worthwhile change on its own terms, but one
+// Chorus already has â€” a worthwhile change on its own terms, but one
 // that alters how the existing Delay sounds, so it is kept separate.
 // Chorus Rate is left out for a different reason: modulating the rate of
 // one LFO with another is hard to hear as anything but drift.
@@ -5778,7 +5782,7 @@ void updateFxEffective(float lfoVal){
 
     // A pad that reads "off" must actually BE off. Mix=0 is this
     // project's off switch, and fxIsOn() (which decides how the pad is
-    // drawn) tests the base value — so without this, tilting into a Mix
+    // drawn) tests the base value â€” so without this, tilting into a Mix
     // offset would make an effect audible while its pad still showed as
     // off. Fading an effect up from near-silence with tilt still works:
     // turn the pad on and set a low base Mix. The other parameters need
@@ -5808,12 +5812,12 @@ void updateFxEffective(float lfoVal){
     // until the depth drops below roughly 10 bits, and the old curve did
     // not reach that until about 45%. Half the travel did nothing and the
     // effect only announced itself near the top. 10 bits down to 2 puts
-    // the audible range across the whole control — 30% now lands on 7.6
+    // the audible range across the whole control â€” 30% now lands on 7.6
     // bits where the old curve gave 12.1. The maths is otherwise
     // untouched; this is purely how the setting maps onto bit depth.
     fxEffBitcrushLevels=(crush<=0.001f)?0.f:powf(2.f,10.f-crush*8.f);
     // The "Bit-crusher does nothing" diagnostic that used to sit here
-    // (v0.9902) is retired (v0.9997x, UI/UX diagnostic pass) — its own
+    // (v0.9902) is retired (v0.9997x, UI/UX diagnostic pass) â€” its own
     // comment said to remove it once the cause was known, and bitcrush
     // has since been exercised extensively (the Randomize audit, morph
     // investigations, ordinary use) with no further reports of it doing
@@ -5822,11 +5826,11 @@ void updateFxEffective(float lfoVal){
 
 // FX: Soft Limiter (v0.9872). Unlike control-rate parameters (pitch,
 // filter cutoff, etc.), a limiter/saturator has to respond to the
-// INSTANTANEOUS sample value — it can't be computed once per buffer the
+// INSTANTANEOUS sample value â€” it can't be computed once per buffer the
 // way expensive-but-slowly-changing parameters are elsewhere in this
 // file. So instead of a transcendental function (tanhf, which the
 // project's own established rule keeps out of the per-sample loop),
-// this uses the classic x/(1+|x|) rational soft-clip curve — a smooth,
+// this uses the classic x/(1+|x|) rational soft-clip curve â€” a smooth,
 // tanh-like saturation shape from just one fabsf() and one division,
 // cheap enough to run every sample safely.
 int16_t applySoftLimit(int16_t s,float drive,float mix){
@@ -5840,7 +5844,7 @@ int16_t applySoftLimit(int16_t s,float drive,float mix){
 // FX: Chorus (v0.9873). Writes the dry signal into a circular delay
 // buffer every sample, then reads it back from a position that swings
 // around a ~10ms base delay by +-Depth/2, driven by an LFO (sineTable
-// lookup, same cheap approach as Ring Mod's carrier — no fresh sinf()
+// lookup, same cheap approach as Ring Mod's carrier â€” no fresh sinf()
 // call per sample). The read position is fractional, so the two nearest
 // buffer samples are linearly interpolated for a smooth result instead
 // of a stair-stepped one.
@@ -5856,13 +5860,13 @@ int16_t applyChorus(int16_t dry){
 
     // Smooth the read distance per sample (v0.9877). Anything that moves
     // this value in a step moves the read position in a step, and that is
-    // a discontinuity in the output — a click. fxEffChorusDepthMs is
+    // a discontinuity in the output â€” a click. fxEffChorusDepthMs is
     // resolved once per buffer, so as soon as Chorus Depth became an
     // IMU/LFO target in v0.9876 it could jump every ~23ms; a one-pole
     // filter here removes that whole class of problem for a single
     // multiply-add per sample. The ~11ms time constant is far shorter
     // than a chorus LFO cycle (200ms at the fastest 5Hz setting), so the
-    // sweep itself is untouched — only steps get rounded off.
+    // sweep itself is untouched â€” only steps get rounded off.
     float delaySamplesTarget=delayMs*0.001f*SAMPLE_RATE;
     chorusDelaySmooth+=(delaySamplesTarget-chorusDelaySmooth)*0.002f;
     float delaySamples=chorusDelaySmooth;
@@ -5877,7 +5881,7 @@ int16_t applyChorus(int16_t dry){
     // Hold the wet path silent until the read pointer has left the empty
     // region, then fade it in over ~28ms (v0.9878). Without this the wet
     // signal reappears as a step at exactly delaySamples after the first
-    // note following a silence — audible as a click on key press, scaled
+    // note following a silence â€” audible as a click on key press, scaled
     // by Mix. It never fired during an arpeggio because the line never
     // empties between fast notes, which is precisely the difference that
     // pointed here.
@@ -5894,9 +5898,9 @@ int16_t applyChorus(int16_t dry){
 }
 
 // FX: Delay/Echo (v0.9874). Reads back a single delayed copy at a fixed
-// (integer, not fractional — delay time doesn't need to sweep smoothly
+// (integer, not fractional â€” delay time doesn't need to sweep smoothly
 // the way Chorus's does) offset, then writes dry+feedback*delayed back
-// into the buffer — repeat echoes emerge and decay naturally on their
+// into the buffer â€” repeat echoes emerge and decay naturally on their
 // own from that recirculation, without needing to explicitly track or
 // sum multiple echo taps.
 int16_t applyDelay(int16_t dry){
@@ -5917,7 +5921,7 @@ int16_t applyDelay(int16_t dry){
     return (int16_t)(dry*(1.f-fxEffDelayMix)+delayed*fxEffDelayMix);
 }
 
-// FX: Reverb (v0.9879). Freeverb topology — see the buffer declarations
+// FX: Reverb (v0.9879). Freeverb topology â€” see the buffer declarations
 // above for why these particular lengths and why float.
 //
 // Each comb is a delay line fed back on itself through a one-pole lowpass,
@@ -5933,7 +5937,7 @@ int16_t applyDelay(int16_t dry){
 // is an integer division and there would be twelve of them per sample.
 // Reverb over a whole buffer at once (v0.9915).
 //
-// Same algorithm, same coefficients, same order — only the bookkeeping
+// Same algorithm, same coefficients, same order â€” only the bookkeeping
 // moved. Called per sample, this function had to reload twelve buffer
 // indices and eight damping states from memory, use them once, and write
 // them all back, 1024 times per buffer. None of that is the reverb; it is
@@ -6022,7 +6026,7 @@ void clearReverbState(){
 // decaying, and from performPatchToneReset() so a reset really does
 // start from silence rather than from the previous patch's echoes.
 // Resetting the write indices to 0 alongside is safe precisely because
-// the whole buffer is zero — there is no "old" position left to respect.
+// the whole buffer is zero â€” there is no "old" position left to respect.
 void clearFxBuffers(){
     memset(chorusBuffer,0,sizeof(chorusBuffer));
     memset(delayBuffer, 0,sizeof(delayBuffer));
@@ -6031,13 +6035,13 @@ void clearFxBuffers(){
     // Reverb (v0.9879): its tail is by far the longest-lived FX state, so
     // leaving it behind would mean a patch reset still rings out the old
     // room. Indices go back to 0 alongside, which is safe because the
-    // buffers are zero — there is no older position left to respect.
+    // buffers are zero â€” there is no older position left to respect.
     clearReverbState();
     // chorusLfoPhase is deliberately NOT reset here (v0.9877). It was,
     // and that was the source of the chorus crackle: the phase sets the
     // read distance, so snapping it to 0 teleports the read position by
     // up to ~900 samples in a single step, and a step in read position is
-    // a step in the output waveform — a click, scaled by Mix, which is
+    // a step in the output waveform â€” a click, scaled by Mix, which is
     // exactly how it presented (worse the higher Mix went). This runs at
     // the end of every FX tail, so with an arpeggio it fired in the gap
     // between notes and clicked on every one. The LFO is a free-running
@@ -6054,7 +6058,7 @@ bool fxTailPending  = false;
 int  fxTailQuietBufs= 0;
 int  fxTailBufCount = 0;
 // Peak (absolute, int16 scale) below which a whole buffer counts as
-// silent — roughly -60dBFS, well under anything audible through the
+// silent â€” roughly -60dBFS, well under anything audible through the
 // Cardputer's speaker.
 constexpr int FX_TAIL_SILENCE_PEAK = 32;
 // Two consecutive quiet buffers (~46ms) before declaring the tail over,
@@ -6077,14 +6081,14 @@ void advanceEnvelope(bool keyHeld){
     switch(envPhase){
         case EnvPhase::IDLE:    envLevel=0;playingFreq=0;break;
         case EnvPhase::ATTACK:
-            // Only use the held frequency when no key is actively pressed —
+            // Only use the held frequency when no key is actively pressed â€”
             // otherwise a genuinely new keypress should always take priority
             // (previously heldFreq permanently overrode any new note).
             playingFreq=(noteHeld&&heldFreq>0&&currentFreq==0)?heldFreq:currentFreq;
             if(adsr.attackTime<=0){envLevel=1;envPhase=EnvPhase::DECAY;}
             else{envLevel+=dt/adsr.attackTime;if(envLevel>=1){envLevel=1;envPhase=EnvPhase::DECAY;}}
             // Captured at the moment of release, not read back from
-            // sustainLevel (v0.9993) — see the note above RELEASE.
+            // sustainLevel (v0.9993) â€” see the note above RELEASE.
             if(!keyHeld){envReleaseStartLevel=envLevel;envPhase=EnvPhase::RELEASE;}
             break;
         case EnvPhase::DECAY:
@@ -6099,7 +6103,7 @@ void advanceEnvelope(bool keyHeld){
         case EnvPhase::RELEASE:
             // Releasing during DECAY, before it reaches sustainLevel,
             // means envLevel at this point can be well above sustainLevel
-            // — and for a percussive patch with sustainLevel=0 (decay-only,
+            // â€” and for a percussive patch with sustainLevel=0 (decay-only,
             // no held tone), the old formula multiplied the decrement by
             // sustainLevel itself, so a release starting above 0 decremented
             // by exactly zero every sample and never reached 0 at all. The
@@ -6151,11 +6155,11 @@ void advanceEnvelope(bool keyHeld){
 // Audio task (Core 1)
 // ==========================================================
 // Instantaneous morph/PWM actually used for audio this sample (includes IMU
-// offsets and General LFO modulation) — read by MAIN screen's waveform
+// offsets and General LFO modulation) â€” read by MAIN screen's waveform
 // preview so what's displayed matches what's actually playing.
 float lastModMorph=0.f, lastModShape=0.5f;
 
-// Diagnostic buffer-timing counters — audioTask (Core 0) only updates these
+// Diagnostic buffer-timing counters â€” audioTask (Core 0) only updates these
 // (fast, no I/O); loop() (Core 1) does the actual Serial.printf() once a
 // second, so USB/Serial I/O timing can never affect audio-critical Core 0.
 unsigned long diagWindowStartMs=0, diagCount=0, diagOverCount=0, diagSumUs=0, diagMaxUs=0;
@@ -6164,21 +6168,21 @@ unsigned long diagPrintCount=0, diagPrintSumUs=0, diagPrintMaxUs=0, diagPrintOve
 
 // The mirror direction (v0.9997x): set every loop() pass, checked from
 // audioTask in diagRecordBuffer() below. Added after a report that no
-// earlier diagnostic covers — total input lockup (ARP wouldn't stop,
+// earlier diagnostic covers â€” total input lockup (ARP wouldn't stop,
 // Latch wouldn't release, no key did anything) while audioTask kept
 // logging normally throughout and after, meaning audioTask itself was
 // never the one stuck. loop() has no way to report its own hang from
-// inside it — if it is truly stuck, nothing there can run, including a
-// print statement — so the only place that can notice is the one side
+// inside it â€” if it is truly stuck, nothing there can run, including a
+// print statement â€” so the only place that can notice is the one side
 // genuinely guaranteed to keep running independently: audioTask, on the
 // other core, exactly the same reasoning as the original heartbeat, just
 // checking in the opposite direction. Declared here, ahead of
 // diagRecordBuffer(), rather than next to audioTaskHeartbeatUs further
-// down — that placement was tried first and built after
+// down â€” that placement was tried first and built after
 // diagRecordBuffer() already needed it.
 volatile unsigned long loopHeartbeatMs=0;
 
-// Also moved here (v0.9997x, same fix) — morphStart() resets this on
+// Also moved here (v0.9997x, same fix) â€” morphStart() resets this on
 // every call now, including redirects, and morphStart() is defined
 // before morphDiagLog[]/morphDiagCount's original spot near morphTick().
 // The array itself (morphDiagLog[]) stays where it was; only the count
@@ -6193,7 +6197,7 @@ int morphDiagCount=0;
 // and simply converged on the buffer period (~23220us), with the "over
 // budget" counter then firing on buffers that were never actually late.
 // Checked directly here, not deferred through diagPrintPending the way
-// [audioTask]'s own timing summary is (v0.9997x) — if loop() is truly
+// [audioTask]'s own timing summary is (v0.9997x) â€” if loop() is truly
 // hung, it would never get around to consuming a deferred flag, so this
 // prints immediately from audioTask's own side instead, the one place
 // still guaranteed to be running independently.
@@ -6216,7 +6220,7 @@ inline void diagRecordBuffer(unsigned long dspUs){
         unsigned long loopSilentMs=nowMs-loopHeartbeatMs;
         // Generous margin (2s): loop() is not real-time critical the way
         // audioTask is, and can legitimately take a bit longer during a
-        // full-screen redraw or SD access — this is for a genuine hang,
+        // full-screen redraw or SD access â€” this is for a genuine hang,
         // not routine variance.
         if(loopSilentMs>2000){
             Serial.printf("[loop] no heartbeat for %lums - main loop may be stuck\n",
@@ -6225,7 +6229,7 @@ inline void diagRecordBuffer(unsigned long dspUs){
     }
 }
 
-// Set every buffer by audioTask, read only by loop() (v0.99944) — plain
+// Set every buffer by audioTask, read only by loop() (v0.99944) â€” plain
 // volatile is enough for a single word that only needs "is this moving",
 // not multi-field consistency the way the morph-chain state did.
 volatile unsigned long audioTaskHeartbeatUs=0;
@@ -6240,7 +6244,7 @@ void audioTask(void *pvParameters){
     while(true){
         unsigned long bufStartUs=micros();
         // Proof of life, checked from loop() (v0.99944). Added to actually
-        // find out what a "silent until reset" morph incident is —
+        // find out what a "silent until reset" morph incident is â€”
         // whether audioTask has genuinely stopped running (a deadlock,
         // most likely on morphChainMux given v0.99943's timing) versus
         // still running but producing zero/near-zero samples for some
@@ -6254,11 +6258,11 @@ void audioTask(void *pvParameters){
 
         if(envPhase==EnvPhase::IDLE){
             // params.timbreMorph itself was frozen while idle (not just
-            // the two below) — its smoothing toward timbreMorphTarget
+            // the two below) â€” its smoothing toward timbreMorphTarget
             // only happens in the per-sample loop this branch skips, so
             // IMU tilts updating the target (via updateImu(), which runs
             // regardless of note state) never actually moved the real
-            // value while nothing was playing — meaning the chain's last
+            // value while nothing was playing â€” meaning the chain's last
             // waveform could be aimed at by tilt but never actually
             // reached/heard/shown until a note resumed the smoothing.
             // Snap directly (no audible smoothing needed with no note
@@ -6266,18 +6270,18 @@ void audioTask(void *pvParameters){
             //
             // Gated on !morphActive now (v0.99945): a patch morph also
             // drives this same pair on its own independent timeline, via
-            // morphApply()'s mlerp — which runs regardless of note state
+            // morphApply()'s mlerp â€” which runs regardless of note state
             // deliberately, so the sweep is visible/audible with nothing
             // held. Snapping here unconditionally fought that every
             // buffer while idle, so the display sat at the FINAL target
             // throughout an idle morph and only revealed the true
             // in-progress value the instant a key left IDLE and this
             // branch stopped running. The IMU case this was written for
-            // is unaffected — it only ever mattered while NOT mid-morph.
+            // is unaffected â€” it only ever mattered while NOT mid-morph.
             if(!morphActive)params.timbreMorph=params.timbreMorphTarget;
             lastModMorph=params.timbreMorph;
             // Shape's IMU offset is smoothed in the buffer-rate block, which
-            // this branch skips — so with no note sounding it froze, and the
+            // this branch skips â€” so with no note sounding it froze, and the
             // IMU screen's Shape readout and level bar sat still while
             // Timbre's moved. Snap it here for the same reason timbreMorph
             // is snapped just above: no note is sounding, so there is
@@ -6285,14 +6289,14 @@ void audioTask(void *pvParameters){
             // timbreMorph and missed the neighbouring parameter (v0.9902).
             params.oscShapeOffset=params.oscShapeOffsetTarget;
             lastModShape=params.oscShape+params.oscShapeOffset;
-            // Rebuild here too (v0.9891) — the buffer-rate block above is
+            // Rebuild here too (v0.9891) â€” the buffer-rate block above is
             // skipped while idle, and without this the VCO waveform preview
             // would freeze at the last duty until a note was played. Same
             // idle-branch trap that caught the preview in v0.9831 and
             // timbreMorph in v0.9841.
             updateSquareDuty(constrain(params.oscShape+params.oscShapeOffset,0.f,1.f));
             // The Morph chain is edited from its own screen, which means
-            // with no note sounding — so this branch has to refresh too,
+            // with no note sounding â€” so this branch has to refresh too,
             // or the VCO preview would keep drawing the old chain.
             refreshMorphTablePtrs();
             phase=0;subPhase=0;
@@ -6301,7 +6305,7 @@ void audioTask(void *pvParameters){
             // is exactly what broke the time-based effects: applyChorus()
             // and applyDelay() simply stopped being called, so the delay
             // line froze mid-stride with the last note still in it. Two
-            // symptoms, one cause — the echoes were cut off dead the
+            // symptoms, one cause â€” the echoes were cut off dead the
             // instant the note ended, and the NEXT note-on read that stale
             // audio straight back out at full level, a hard step away from
             // silence heard as a click. So instead of going straight to
@@ -6341,7 +6345,7 @@ void audioTask(void *pvParameters){
                     // Silence alone is not enough to end the tail while
                     // Delay is on (v0.9964). Right after a note stops, the
                     // delay line's READ position is still inside the
-                    // silent stretch before the first echo — so the output
+                    // silent stretch before the first echo â€” so the output
                     // is genuinely quiet, the two-quiet-buffer test fired
                     // after ~46ms, and clearFxBuffers() wiped the line
                     // before the echo ever arrived. With Delay alone that
@@ -6375,7 +6379,7 @@ void audioTask(void *pvParameters){
                     continue;
                 }
                 // Neither time-based effect is on, so there is no tail to
-                // ring out — but the buffers still hold the last note, and
+                // ring out â€” but the buffers still hold the last note, and
                 // switching Delay on later would read it back out as that
                 // same click. Clear now, while nothing is sounding.
                 fxTailPending=false;fxTailQuietBufs=0;fxTailBufCount=0;
@@ -6414,7 +6418,7 @@ void audioTask(void *pvParameters){
         // not audio-rate: IMU tilt changes slowly compared to a ~23ms buffer,
         // so smoothing these once per buffer (instead of once per sample,
         // 1024x fewer times) removes a meaningful chunk of per-sample CPU
-        // cost with no audible difference — this was found to be a likely
+        // cost with no audible difference â€” this was found to be a likely
         // contributor to periodic buffer-underrun stutter under heavy load.
         constexpr float SM_BUF=0.5f;
         params.oscShapeOffset       +=(params.oscShapeOffsetTarget      -params.oscShapeOffset)      *SM_BUF;
@@ -6430,7 +6434,7 @@ void audioTask(void *pvParameters){
         seqSwingOffset       +=(seqSwingOffsetTarget       -seqSwingOffset)      *SM_BUF;
         seqAccentCutoffBoost +=(seqAccentCutoffBoostTarget -seqAccentCutoffBoost)*SM_BUF;
         seqAccentResoBoost   +=(seqAccentResoBoostTarget   -seqAccentResoBoost)  *SM_BUF;
-        // FX offsets (v0.9876) — smoothed at buffer rate for the same
+        // FX offsets (v0.9876) â€” smoothed at buffer rate for the same
         // reason as everything above: tilt moves far more slowly than a
         // ~23ms buffer, so per-sample smoothing would be wasted work.
         params.ringModRateOffset  +=(params.ringModRateOffsetTarget  -params.ringModRateOffset)  *SM_BUF;
@@ -6457,14 +6461,14 @@ void audioTask(void *pvParameters){
         // never change mid-buffer), so recomputing them 1024x/buffer was pure
         // waste. The sub-oscillator's powf() call in particular was expensive
         // (transcendental function) and was being called on every single
-        // sample whenever the sub-oscillator was active — this was a major
+        // sample whenever the sub-oscillator was active â€” this was a major
         // contributor to audioTask missing its real-time budget every buffer.
         float effSubLevel  =constrain(params.subOscLevel+params.subLevelOffset,0.f,1.f);
         float effNoiseLevel=constrain(params.noiseLevel+params.noiseOffset,0.f,1.f);
         float shapeBase    =constrain(params.oscShape+params.oscShapeOffset,0.f,1.f);
         // Square's pulse width is baked into its table, so it resolves once
         // per buffer rather than per sample. The LFO is sampled here the
-        // same way the FX block below does it — ample for the sub-5Hz rates
+        // same way the FX block below does it â€” ample for the sub-5Hz rates
         // PWM is actually used at, and a table cannot be rebuilt per sample
         // in any case.
         {
@@ -6480,7 +6484,7 @@ void audioTask(void *pvParameters){
         refreshMorphTablePtrs();
         float subOctaveRatio=powf(2.f,(float)params.subOscOctave);
         // Oscillator 2, resolved once per buffer (v0.9911). The pitch ratio
-        // needs a powf(), which must never run per sample — same reason
+        // needs a powf(), which must never run per sample â€” same reason
         // subOctaveRatio is computed here.
         float effOsc2Level=constrain(params.osc2Level+params.osc2LevelOffset,0.f,1.f);
         // Same buffer-rate pointer resolution the Morph chain gets.
@@ -6488,7 +6492,7 @@ void audioTask(void *pvParameters){
         int16_t *osc2TblB=oscWaveformTableB(params.osc2Waveform);
         // Square's Shape lives in the table, not in the A/B blend, so
         // oscillator 2 rebuilds its own copy from its own Shape and then
-        // points both sides at it — making the blend below a no-op, which
+        // points both sides at it â€” making the blend below a no-op, which
         // is what it already was for Square (v0.9935).
         bool osc2IsSquare=(params.osc2Waveform==OscWaveform::SQUARE);
         if(osc2IsSquare){
@@ -6503,7 +6507,7 @@ void audioTask(void *pvParameters){
 
         // FX modulation resolved once per buffer (v0.9876), sampling the
         // general LFO the same way the filter-cutoff block just below
-        // does — these are control-rate parameters, so there is nothing
+        // does â€” these are control-rate parameters, so there is nothing
         // to gain from re-deriving them 1024x per buffer.
         {
             float lfoFx=0.f;
@@ -6546,7 +6550,7 @@ void audioTask(void *pvParameters){
                     * imuScale * driftCutoffMult(),
                 FILTER_CUTOFF_MIN, FILTER_CUTOFF_MAX);
             float dynQ = constrain(filterParams.resonanceQ + params.resonanceOffset + seqAccentResoBoost, FILTER_Q_MIN, FILTER_Q_MAX);
-            // Passed directly now (v0.99946) — filterParams.cutoffHz/
+            // Passed directly now (v0.99946) â€” filterParams.cutoffHz/
             // resonanceQ are never touched here at all any more. See the
             // note above updateFilterCoefficients() for what this
             // replaced and why.
@@ -6555,12 +6559,12 @@ void audioTask(void *pvParameters){
 
         for(int i=0;i<BUF;i++){
             // Exponential smoothing asymptotically approaches its target
-            // but mathematically never exactly reaches it — invisible for
+            // but mathematically never exactly reaches it â€” invisible for
             // most of the parameters below, but timbreMorph is used for
             // discrete waveform-index lookup (both the audio blend's
             // (int) truncation and the VCO/IMU display labels), so
-            // without an explicit snap it can spend a long time — or,
-            // once float precision is exhausted, forever — just short of
+            // without an explicit snap it can spend a long time â€” or,
+            // once float precision is exhausted, forever â€” just short of
             // the true target, meaning the chain's LAST waveform could
             // never actually be selected/shown even at full IMU deflection.
             if(fabsf(params.timbreMorphTarget-params.timbreMorph)<0.01f)params.timbreMorph=params.timbreMorphTarget;
@@ -6592,7 +6596,7 @@ void audioTask(void *pvParameters){
             lfoPhase+=(float)WAVE_TABLE_SIZE*effLfoRateHz/SAMPLE_RATE;
             if(lfoPhase>=WAVE_TABLE_SIZE){
                 lfoPhase-=WAVE_TABLE_SIZE;
-                // New Sample & Hold cycle starting — draw a fresh value.
+                // New Sample & Hold cycle starting â€” draw a fresh value.
                 // Done here (the one place with true per-sample phase
                 // tracking) rather than inside lfoTableSample(), so the
                 // once-per-buffer filter-cutoff read and the LFO screen's
@@ -6614,7 +6618,7 @@ void audioTask(void *pvParameters){
             // Vibrato at all, so a leftover depth with no axis assigned
             // would have been unreachable dead modulation. Now that Depth
             // is a VCO menu control the gate would do the opposite of what
-            // a user expects — set Depth, hear nothing, no way to tell why.
+            // a user expects â€” set Depth, hear nothing, no way to tell why.
             float effVibratoDepth=fxEffVibratoDepth;
             float lfoPitchCents=(lfo.target==LfoTarget::PITCH)?lfoVal*LFO_PITCH_MAX_CENTS:0.f;
             float totalCents=vlfo*effVibratoDepth*VIBRATO_MAX_CENTS
@@ -6635,8 +6639,8 @@ void audioTask(void *pvParameters){
             float phInc=(float)WAVE_TABLE_SIZE*(playF*pr)/SAMPLE_RATE;
             // Published for MIDI bend out (v0.99876). currentFreq is only
             // the TARGET note; everything that makes the pitch expressive
-            // — portamento's glide, key bend, vibrato, detune, Analog
-            // Drift — is applied here and nowhere else, which is why the
+            // â€” portamento's glide, key bend, vibrato, detune, Analog
+            // Drift â€” is applied here and nowhere else, which is why the
             // bend calculation had nothing to work from and sent nothing.
             // Sampled once per buffer: the MIDI side is throttled to 15ms
             // anyway, so per-sample accuracy would be thrown away.
@@ -6661,7 +6665,7 @@ void audioTask(void *pvParameters){
             int16_t sample=getMorphedSample(idx,modMorph,modShape);
 
             // Oscillator 2 (v0.9911). Skipped entirely at level 0, so a
-            // patch that does not use it costs nothing — same convention
+            // patch that does not use it costs nothing â€” same convention
             // as the FX mixes. LFO->Timbre/Shape modulates both
             // oscillators: it is one modulation source, and having it
             // reach only osc 1 would be surprising.
@@ -6682,13 +6686,13 @@ void audioTask(void *pvParameters){
 
             // Sub oscillator (sine wave, 1 or 2 octaves below).
             // Uses its own independent phase accumulator (subPhase) rather
-            // than being derived from the main oscillator's idx — deriving
+            // than being derived from the main oscillator's idx â€” deriving
             // it from idx caused a discontinuous phase reset every time the
             // main oscillator wrapped (i.e. every main cycle), which got
             // audibly worse the lower the octave (more main-cycles pass per
             // sub-cycle), producing periodic clicks/warble that got more
             // prominent the higher the sub level.
-            // effSubLevel/subOctaveRatio are computed once per buffer above —
+            // effSubLevel/subOctaveRatio are computed once per buffer above â€”
             // the powf() call in particular is too expensive to repeat every
             // sample (44100x/sec).
             if(effSubLevel>0.001f && playF>0){
@@ -6708,7 +6712,7 @@ void audioTask(void *pvParameters){
 
             // Ring Modulator (v0.987): multiplies the signal by an
             // audio-rate carrier (its own independent phase accumulator,
-            // reusing sineTable like the sub-oscillator does — a table
+            // reusing sineTable like the sub-oscillator does â€” a table
             // lookup, not a fresh sinf() call, so this stays cheap).
             // Mix=0 means fully off; skip the phase advance too so an
             // unused Ring Mod doesn't quietly drift out of sync while off.
@@ -6738,7 +6742,7 @@ void audioTask(void *pvParameters){
             // Time-based FX sit AFTER the VCA (v0.9875), giving the
             // conventional VCO -> VCF -> VCA -> FX order. They used to run
             // before the envelope multiply, which meant every echo was
-            // gated a second time by the envelope that produced it — so a
+            // gated a second time by the envelope that produced it â€” so a
             // Delay could never actually outlast its own note. Ring Mod and
             // Bit-crusher stay upstream on purpose: those shape the tone
             // itself and belong inside the voice, not after it.
@@ -6750,20 +6754,20 @@ void audioTask(void *pvParameters){
         }
         applyReverbBlock(buf,BUF);
         applySoftLimitBlock(buf,BUF,fxEffLimiterDrive,params.limiterMix);
-        // Diagnostic: one buffer's real-time budget is BUF/SAMPLE_RATE ≈ 23220us.
+        // Diagnostic: one buffer's real-time budget is BUF/SAMPLE_RATE â‰ˆ 23220us.
         // Measured here, BEFORE playRaw(), so it reflects DSP cost alone
         // (see diagRecordBuffer above for why measuring past playRaw()
         // reported the playback rate instead). Only simple counters are
-        // touched on this core — the actual Serial.printf() summary line
+        // touched on this core â€” the actual Serial.printf() summary line
         // happens once a second from loop() on Core 1 instead (see
         // diagPrintPending). Even a single, infrequent Serial write can
         // occasionally block for some time on USB CDC (particularly with a
-        // host actively reading, e.g. a serial monitor open) — enough to
+        // host actively reading, e.g. a serial monitor open) â€” enough to
         // delay the next buffer's start. Moving it off Core 0 entirely
         // removes that as a possible contributor.
         diagRecordBuffer(micros()-bufStartUs);
         M5Cardputer.Speaker.playRaw(buf,BUF,SAMPLE_RATE,false,1,CH,false);
-        // Yield briefly, but not every single buffer — vTaskDelay(1) can
+        // Yield briefly, but not every single buffer â€” vTaskDelay(1) can
         // actually take longer than 1ms depending on the system tick rate,
         // and doing it every ~23ms buffer adds up. Since we only need to
         // give Core 0's idle task/watchdog a chance far more often than its
@@ -6862,7 +6866,7 @@ void resetParamToDefault(ImuTarget t){
             arpSwingOffset=arpSwingOffsetTarget=0;
             seqSwingOffset=seqSwingOffsetTarget=0;
             break;
-        // FX (v0.9876) — clearing the offset (not the menu value) is the
+        // FX (v0.9876) â€” clearing the offset (not the menu value) is the
         // right "default" here, exactly as for every other offset above.
         case ImuTarget::FX_RING_RATE:    params.ringModRateOffset  =params.ringModRateOffsetTarget  =0;break;
         case ImuTarget::FX_RING_MIX:     params.ringModMixOffset   =params.ringModMixOffsetTarget   =0;break;
@@ -6906,14 +6910,14 @@ bool imuBipolarAuto(ImuTarget t,bool cfg){
     // Osc Mix is a crossfade between the two oscillators, so which
     // DIRECTION you tilt is the whole control (v0.9935). Without this it
     // inherited the axis's own bipolar setting, and with that off the
-    // caller takes fabsf() of the tilt — both directions then produced the
+    // caller takes fabsf() of the tilt â€” both directions then produced the
     // same positive value and the mix only ever moved toward oscillator 1.
     if(t==ImuTarget::OSC_MIX)return true;
     // Shape is bipolar by nature (v0.9943). Its neutral is the MIDDLE of
     // its range, not an end: on Square, 0.5 is the symmetrical square and
     // the two directions widen or narrow the pulse. With the axis's own
     // bipolar setting off the caller took fabsf(), so both tilts produced
-    // the same positive offset and Shape only ever travelled one way —
+    // the same positive offset and Shape only ever travelled one way â€”
     // exactly the OSC_MIX fault above, in a parameter where the
     // asymmetry was harder to spot because the result still changed.
     // Same for oscillator 2's Shape, for the same reason.
@@ -6923,7 +6927,7 @@ bool imuBipolarAuto(ImuTarget t,bool cfg){
 
 // Original Cardputer has no IMU, so tilt is substituted with key input:
 // ';'/'.' move a virtual Y axis up/down, ','/'/' move a virtual X axis
-// left/right — moves toward the extreme while held, springs back to
+// left/right â€” moves toward the extreme while held, springs back to
 // center on release (unless that axis's Hold is toggled on via A/S,
 // matching the IMU hold behavior). Deadzone and Calibration don't apply
 // to a key-driven virtual axis, so those items are hidden from the PAD
@@ -6934,7 +6938,7 @@ constexpr float PAD_SPRING_RATE=0.15f;  // fraction of the way back to center pe
 
 void updatePadVirtualAxes(){
     // ';' '.' ',' '/' double as menu navigation on every other screen, so
-    // only let them move the PAD while actually on MAIN — otherwise
+    // only let them move the PAD while actually on MAIN â€” otherwise
     // scrolling through VCO/VCF/etc. would silently drag the PAD position
     // around in the background.
     if(appMode!=AppMode::PLAY)return;
@@ -7049,7 +7053,7 @@ float resolveFreqFromKeys(){
             if(ROW2_KEYS[i]==*it)
                 return row2Freqs[i]*powf(2.f,(float)params.octaveShift)*powf(2.f,(float)transposeSemitones/12.f);
     }
-    // Row 1's 13th note is the Backspace/Delete key — not a printable
+    // Row 1's 13th note is the Backspace/Delete key â€” not a printable
     // character, so KeysState reports it via .del instead of .word.
     // Checked last (lowest priority vs. any note key).
     if(s.del)
@@ -7058,7 +7062,7 @@ float resolveFreqFromKeys(){
 }
 
 // ---------------------------------------------------------
-// Arpeggiator (CardputerADV only — original Cardputer's 3-key rollover
+// Arpeggiator (CardputerADV only â€” original Cardputer's 3-key rollover
 // limit can't reliably support the multi-key chord holding this needs)
 // ---------------------------------------------------------
 enum class ArpType : uint8_t { UP, DOWN, UP_DOWN, AS_PLAYED, RANDOM };
@@ -7076,14 +7080,14 @@ int   arpStepIndex=0;
 unsigned long arpLastStepMs=0;
 
 // Latch mode ('V' key): on a cramped keyboard, reliably holding several
-// keys down at once is hard — a finger lifting even briefly drops that
+// keys down at once is hard â€” a finger lifting even briefly drops that
 // note from the chord. With Latch on, each note-key press TOGGLES that
 // note's membership in the held chord instead, so a chord can be built
 // up one tap at a time without needing continuous physical holds.
 // The MIDI note lists and the note-to-Hz helper live further down with the
 // rest of the MIDI code, but the arpeggiator below needs them (v0.9985).
 // Declared here rather than moved, because they belong with MIDI and the
-// arp is the borrower — this file has repeatedly gone wrong by relocating
+// arp is the borrower â€” this file has repeatedly gone wrong by relocating
 // code to satisfy the compiler instead of declaring it.
 constexpr int MIDI_NOTE_STACK_FWD=8;
 extern uint8_t midiHeldNotes[MIDI_NOTE_STACK_FWD];
@@ -7111,7 +7115,7 @@ void arpLatchToggle(){
     arpLatchedCount=0; // always start fresh, whichever direction we're toggling
     midiLatchedCount=0;   // v0.9984: the MIDI half of the same latch
     // Reflects the clear immediately rather than waiting for the next key
-    // or MIDI event to happen to trigger a rebuild (v0.99931) — toggling
+    // or MIDI event to happen to trigger a rebuild (v0.99931) â€” toggling
     // Latch off should silence what it was holding right away.
     rebuildArpChord();
 }
@@ -7124,7 +7128,7 @@ bool noteKeyBaseFreq(char c,float &freqOut){
 
 // Latch's toggle-on-new-keypress bookkeeping (v0.99931, split out of what
 // used to be updateArpHeldNotes()). This is genuinely a keyChanged-only
-// concern — it detects a NEW physical keypress by diffing against the
+// concern â€” it detects a NEW physical keypress by diffing against the
 // previous frame's key set, which only means anything at the instant a
 // key transitions. Rebuilding arpHeldFreqs[] is a different question
 // (see rebuildArpChord() below) and used to be welded to this in one
@@ -7169,8 +7173,8 @@ void updateArpLatchEdges(){
 }
 
 // The one place arpHeldFreqs[]/arpSortedFreqs[] are built, called by every
-// path that can change what should be sounding — a local key event, a
-// MIDI note on/off, a switch toggling Latch, panic — rather than each
+// path that can change what should be sounding â€” a local key event, a
+// MIDI note on/off, a switch toggling Latch, panic â€” rather than each
 // path deciding for itself whether a rebuild is owed (v0.99931). Reads
 // the CURRENT state directly (arpLatchedKeys[]/midiLatchedNotes[] in
 // Latch mode, live keysState()/midiHeldNotes[] otherwise); it does not
@@ -7178,7 +7182,7 @@ void updateArpLatchEdges(){
 void rebuildArpChord(){
     // The same eligibility rule the local-key path already used
     // (notesAllowed, further down) applies here too (v0.99931), folded in
-    // once so every caller — local keys, MIDI, Latch toggling, panic —
+    // once so every caller â€” local keys, MIDI, Latch toggling, panic â€”
     // gets it automatically rather than each repeating its own version of
     // the check. This is what previously let MIDI rebuild the chord on
     // screens where local keys could not.
@@ -7214,7 +7218,7 @@ void rebuildArpChord(){
         }
         if(s.del&&arpHeldCount<ARP_MAX_NOTES)arpHeldFreqs[arpHeldCount++]=row1Freqs[12]*mult;
         // MIDI notes currently held feed the arpeggiator exactly as local
-        // keys do — this is the whole point of MIDI IN here, since the
+        // keys do â€” this is the whole point of MIDI IN here, since the
         // built-in keyboard can only manage three keys at once and an
         // arpeggio wants more (v0.9984).
         for(int k=0;k<midiHeldCount&&arpHeldCount<ARP_MAX_NOTES;k++)
@@ -7249,8 +7253,8 @@ int nextArpIndex(){
 // ---- MIDI (v0.996) ----
 //
 // Deliberately split from any transport. This layer only turns a stream of
-// BYTES into note events; where those bytes came from — USB, a DIN socket
-// on the MIDI unit, or a test harness — is not its concern. That matters
+// BYTES into note events; where those bytes came from â€” USB, a DIN socket
+// on the MIDI unit, or a test harness â€” is not its concern. That matters
 // because USB MIDI needs a build-time change to the USB mode (and with it
 // the serial log), so getting the message handling right BEFORE touching
 // that keeps the risky part small and keeps this code useful whichever
@@ -7267,7 +7271,7 @@ constexpr uint8_t CC_MODULATION=1,CC_SUSTAIN=64,CC_ALL_NOTES_OFF=123;
 constexpr float MIDI_A4_HZ=440.f;   // note 69
 
 // Modulation wheel drives vibrato depth. It is the near-universal default
-// for CC1, so a keyboard's wheel does something sensible with no setup —
+// for CC1, so a keyboard's wheel does something sensible with no setup â€”
 // and it reuses the existing vibrato offset rather than adding a parallel
 // control, the same approach velocity and pitch bend already take.
 constexpr float MIDI_MOD_MAX_VIBRATO=0.6f;
@@ -7275,7 +7279,7 @@ constexpr float MIDI_MOD_MAX_VIBRATO=0.6f;
 // ---- IMU -> MIDI CC out (v0.99871) ----
 //
 // Tilt the synth, and an external instrument responds. This is the feature
-// people actually noticed at release — IMU-driven timbre — pointed
+// people actually noticed at release â€” IMU-driven timbre â€” pointed
 // outward, and it is the one thing here no other small synth does.
 //
 // Two things make or break it, and both are about not flooding the wire.
@@ -7284,18 +7288,18 @@ constexpr float MIDI_MOD_MAX_VIBRATO=0.6f;
 // thousand messages a second per axis: enough to swamp the link and delay
 // the notes travelling on it. So values are only sent when the 7-bit
 // value CHANGES, and never closer together than MIDI_CC_MIN_INTERVAL_MS.
-// Sending on change alone is not enough — a hand shaking gently around a
+// Sending on change alone is not enough â€” a hand shaking gently around a
 // boundary would still send continuously.
 constexpr unsigned long MIDI_CC_MIN_INTERVAL_MS=15;   // ~66/s per axis, worst case
 bool    midiCcOutEnabled=false;
-uint8_t midiCcOutNumX=CC_MODULATION;   // CC1  — the default a receiver most likely maps
-uint8_t midiCcOutNumY=74;              // CC74 — filter cutoff by convention
+uint8_t midiCcOutNumX=CC_MODULATION;   // CC1  â€” the default a receiver most likely maps
+uint8_t midiCcOutNumY=74;              // CC74 â€” filter cutoff by convention
 uint8_t midiCcOutChannel=0;            // 0-15, shown as 1-16
 int     midiCcLastSentX=-1,midiCcLastSentY=-1;
 unsigned long midiCcLastMsX=0,midiCcLastMsY=0;
 
 // The UART itself is declared further down with the rest of the transport,
-// where it belongs; this is the borrower. (Declaring rather than moving —
+// where it belongs; this is the borrower. (Declaring rather than moving â€”
 // see v0.9985 and v0.99862.)
 extern HardwareSerial midiSerial;
 extern bool midiSerialReady;
@@ -7307,18 +7311,18 @@ void midiSendCC(uint8_t ch,uint8_t cc,uint8_t val){
 }
 
 // norm is the axis's own -1..+1 (bipolar) or 0..1 value, so this maps the
-// full travel onto 0-127 either way — the receiving end gets the whole
+// full travel onto 0-127 either way â€” the receiving end gets the whole
 // range whichever way the axis is configured.
 // ---- Note out (v0.99872) ----
 //
 // Sends whatever this synth is playing as MIDI notes. In Bypass mode the
 // controller's TX reaches the Unit's SAM2695 chip, so this plays the
-// unit's built-in GM synth — WHILE MIDI in still works, since Bypass is
+// unit's built-in GM synth â€” WHILE MIDI in still works, since Bypass is
 // also the mode where the RX pin receives the INPUT socket. That
 // combination is the useful one: play the local keys or an external
 // keyboard, hear C.P.S. and a GM instrument together, with no second
 // piece of hardware involved. (In Separate mode the same bytes go out the
-// OUTPUT socket to external gear instead, but MIDI in stops working —
+// OUTPUT socket to external gear instead, but MIDI in stops working â€”
 // the unit cannot do both.)
 //
 // Deliberately driven from what the synth is ACTUALLY sounding rather
@@ -7360,14 +7364,14 @@ int midiHzToNote(float hz){
 // bend, portamento glide, vibrato, detune and drift is thrown away on the
 // MIDI side. Worse than merely lost: Analog Drift reaches +-22 cents, so
 // near a semitone boundary the note number flips back and forth and the
-// receiver retriggers repeatedly — a chattering that has nothing to do
+// receiver retriggers repeatedly â€” a chattering that has nothing to do
 // with what is being played.
 //
 // So the note number is fixed at note-on and everything after it is sent
 // as bend. +-2 semitones is the General MIDI default range, which the
 // SAM2695 and practically every receiver assume without being told.
 // Beyond that the deviation cannot be expressed, so the note is
-// retriggered at the new pitch — which is right anyway, since a glide of
+// retriggered at the new pitch â€” which is right anyway, since a glide of
 // more than a whole tone IS a new note musically.
 constexpr float MIDI_BEND_RANGE_CENTS=200.f;
 int  midiLastBendSent=8192;
@@ -7410,11 +7414,11 @@ void midiNoteOutUpdate(){
     bool sounding=(envPhase!=EnvPhase::IDLE&&currentFreq>0.f);
     int want=sounding?midiHzToNote(currentFreq):-1;
     // While a note is held, stay on it as long as the deviation fits in
-    // the bend range — midiBendOutUpdate() expresses the difference
+    // the bend range â€” midiBendOutUpdate() expresses the difference
     // (v0.99875). Only a move beyond that warrants a new note.
     if(sounding&&midiLastSentNote>=0&&midiSentNoteHz>0.f&&midiSoundingHz>0.f){
         // Measured against the SOUNDING pitch, the same value the bend is
-        // derived from — testing one and bending the other would let the
+        // derived from â€” testing one and bending the other would let the
         // two disagree about when a new note is needed (v0.99876).
         float cents=fabsf(1200.f*log2f(midiSoundingHz/midiSentNoteHz));
         if(cents<=MIDI_BEND_RANGE_CENTS)want=midiLastSentNote;
@@ -7474,7 +7478,7 @@ bool    midiNoteActive=false;
 // they go into a pending list and are released together when it lifts,
 // which is what a piano pedal does and what every keyboard player expects.
 // Declared HERE rather than up with the CC constants, because it is sized
-// by MIDI_NOTE_STACK just above — the same use-before-declare trap this
+// by MIDI_NOTE_STACK just above â€” the same use-before-declare trap this
 // file keeps setting for itself (fixed in v0.99862).
 bool    midiSustain=false;
 uint8_t midiSustainedNotes[MIDI_NOTE_STACK];
@@ -7485,7 +7489,7 @@ bool    midiPedalTookHold=false;
 
 // Latched MIDI notes, for the arpeggiator's Latch mode (v0.9984). Latch
 // means "keep playing what I pressed after I let go", so it needs its own
-// list — midiHeldNotes empties as fingers lift, which is exactly what
+// list â€” midiHeldNotes empties as fingers lift, which is exactly what
 // Latch is there to survive. Pressing a latched note again removes it, the
 // same toggle the local keys use.
 uint8_t midiLatchedNotes[MIDI_NOTE_STACK];
@@ -7509,7 +7513,7 @@ float midiNoteToHz(uint8_t note){
 
 // Set whenever the held MIDI notes change, so the arpeggiator can rebuild
 // its chord (v0.9986). The arp's chord is rebuilt inside the keyChanged
-// branch of the main loop — i.e. only when a LOCAL key event happens —
+// branch of the main loop â€” i.e. only when a LOCAL key event happens â€”
 // which is why MIDI alone never started an arpeggio, why adding a local
 // keypress suddenly swept the MIDI notes in, and why letting go left the
 // MIDI notes playing as if latched: the list was simply never rebuilt
@@ -7537,7 +7541,7 @@ bool midiStackRemove(uint8_t n){
 //
 // A VL53L1X distance sensor on the Grove port plays pitch by hand height,
 // the way a theremin's pitch antenna does. Volume stays on the IMU tilt,
-// so one unit is enough — which was the constraint from the start.
+// so one unit is enough â€” which was the constraint from the start.
 //
 // It drives currentFreq and the envelope exactly as the MIDI note path
 // does, so the filter, FX, the arpeggiator and note-out all follow with no
@@ -7547,7 +7551,7 @@ bool midiStackRemove(uint8_t n){
 //
 // Wire1 is the board's own bus: the keyboard controller and the IMU live
 // on it at SDA=8/SCL=9, which is why the first scan found 0x18, 0x34 and
-// 0x69. Repointing it at the Grove pins took that bus away from them — and
+// 0x69. Repointing it at the Grove pins took that bus away from them â€” and
 // M5's library reads the IMU every frame, so it claimed the bus straight
 // back. The sensor read once after a rescan and then never again, which is
 // exactly how it presented.
@@ -7565,15 +7569,15 @@ bool  tofPresent=false;
 // Which I2C peripheral to probe (v0.99909). Selectable because it cannot
 // be settled from documentation and it MATTERS: M5's own library owns one
 // of these for the keyboard and the IMU, and taking it away makes the IMU
-// read nonsense — which is heard as parameters moving on their own, the
+// read nonsense â€” which is heard as parameters moving on their own, the
 // waveform changing, and notes appearing with nothing in front of the
 // sensor. All of which were reported with no sensor attached at all.
 // 0 = Grove main port (G1/G2, port Wire). 1 = the Cap LoRa-1262's own
-// Grove port (v0.99913) — its silkscreen reads G8 SDA / G9 SCL, the exact
+// Grove port (v0.99913) â€” its silkscreen reads G8 SDA / G9 SCL, the exact
 // pins M5's library already uses for the keyboard and IMU. So this is not
 // a second bus: it is a tap on the SAME internal one, which I2C supports
 // (multi-drop) in a way UART never could. Selecting this does not call
-// begin() at all — M5 already has that bus running, and re-configuring it
+// begin() at all â€” M5 already has that bus running, and re-configuring it
 // is what caused the IMU corruption in v0.99904. The sensor is simply
 // attached to the bus that is already there.
 int   tofBusIndex=0;
@@ -7600,7 +7604,7 @@ unsigned long thereminLastGoodMs=0;
 // Grace period after (re)enabling, before the watchdog starts counting at
 // all (v0.9992). Reported only on Grove, never on Cap: with nothing in
 // front of the sensor yet, right after startContinuous(), dataReady() can
-// go a beat longer than usual before it first trips — and once ANY real
+// go a beat longer than usual before it first trips â€” and once ANY real
 // reading has come through, the connection stays solid until the next
 // toggle. That pattern is a settling window, not a fault, and 3 seconds
 // was occasionally not enough of one on Grove's marginally different
@@ -7620,7 +7624,7 @@ int   thereminGoodCount=0,thereminBadCount=0;
 //
 // portaFreq is the one that was missed. Portamento glides it toward
 // currentFreq, so leaving it at the last pitch while currentFreq went to
-// zero made it slide down to nothing on its own — heard as the pitch
+// zero made it slide down to nothing on its own â€” heard as the pitch
 // wandering after the hand had left. Pressing a key then started the glide
 // over from there, which is the loop that was reported. Zero is this
 // codebase's "unset" for portaFreq: the note path tests portaFreq<=0 to
@@ -7634,19 +7638,19 @@ void thereminStop(){
 }
 
 // Which Grove pin is SDA cannot be settled from documentation any more
-// than the MIDI RX pin could (v0.9991), so both orders are tried — and
+// than the MIDI RX pin could (v0.9991), so both orders are tried â€” and
 // unlike the MIDI case this runs ONCE at boot, so there is no search to
 // leave running.
 //
 // The bus is also scanned and the addresses logged. "Not found" has
-// several causes that look identical from outside — wrong pins, no power,
-// a sensor at an unexpected address — and the scan separates them: any
+// several causes that look identical from outside â€” wrong pins, no power,
+// a sensor at an unexpected address â€” and the scan separates them: any
 // device at all means the wiring is right and the address is the problem,
 // while an empty bus means it is not.
 // What the boot scan found, kept so the menu can show it (v0.9992).
 //
 // The scan log was written before the serial monitor could attach and was
-// unreadable in practice — which is the same trap the SD and MIDI
+// unreadable in practice â€” which is the same trap the SD and MIDI
 // diagnostics fell into. A result the player can read on the device needs
 // no timing luck at all.
 char tofScanResult[24]="not scanned";
@@ -7656,7 +7660,7 @@ int  tofScanDevices=0;
 // for THAT rather than for any device at all (v0.99903).
 //
 // Scanning for "something, anything" reported six devices with nothing
-// plugged in — three addresses found twice, and those three were the
+// plugged in â€” three addresses found twice, and those three were the
 // board's own 0x18/0x34/0x69. The bus was the internal one: M5Cardputer
 // initialises Wire1 during its own startup, and a later begin() with
 // different pins does not move an already-started bus. Wire.end() first
@@ -7668,13 +7672,14 @@ constexpr uint8_t VL53L1X_ADDR=0x29;
 // Rescan row's count; fullScan=false checks only the sensor's own address
 // (v0.99912). Every ON toggle used to run the full 126-address sweep, and
 // each address is a transaction with the platform's I2C timeout on a
-// no-answer — on this hardware that added up to several seconds, which is
+// no-answer â€” on this hardware that added up to several seconds, which is
 // the freeze reported on Theremin ON/OFF. Reserving the full sweep for an
 // explicit Rescan means enabling Theremin normally costs one transaction,
 // not 126.
 bool thereminTryBus(int sda,int scl,bool fullScan=false){
+    if(M5.isCardenza())return false; // Codec GPIO1/2 and matrix GPIO8/9 are reserved.
     TwoWire *bus=tofBus();
-    // Wire1 (the Cap's port) is never begin()/end()'d — it is M5's bus,
+    // Wire1 (the Cap's port) is never begin()/end()'d â€” it is M5's bus,
     // already running, and touching it is the exact mistake v0.99904
     // fixed. Wire (Grove main) is still owned by this code and gets the
     // usual reconfigure (v0.99913).
@@ -7706,7 +7711,7 @@ bool thereminTryBus(int sda,int scl,bool fullScan=false){
         tofScanDevices+=found;
         if(!sawSensor){
             // Hand the peripheral back rather than sitting on it with the
-            // wrong pins configured (v0.99909) — except the shared bus,
+            // wrong pins configured (v0.99909) â€” except the shared bus,
             // which this code does not own and must not tear down.
             if(tofBusIndex==0)bus->end();
             if(found>0)snprintf(tofScanResult,sizeof(tofScanResult),"%d dev, no 0x29",found);
@@ -7715,8 +7720,8 @@ bool thereminTryBus(int sda,int scl,bool fullScan=false){
     }
     tofSensor.setBus(bus);
     // Lowered from 200ms (v0.99914): the freeze reported after toggling
-    // Theremin on turned out not to be the toggle itself — the log showed
-    // "[ToF] toggle took 0ms" — but a stream of "i2cRead returned Error
+    // Theremin on turned out not to be the toggle itself â€” the log showed
+    // "[ToF] toggle took 0ms" â€” but a stream of "i2cRead returned Error
     // 263" that followed it indefinitely. Each failed transaction was
     // blocking the main loop for up to the configured timeout, over and
     // over, with no limit. 50ms shortens each individual stall.
@@ -7730,44 +7735,49 @@ void midiSerialSuspend();   // defined with the MIDI transport, below
 void midiSerialResume();
 
 void thereminBegin(){
+    if(M5.isCardenza()){
+        thereminEnabled=false;tofPresent=false;tofScanDevices=0;
+        snprintf(tofScanResult,sizeof(tofScanResult),"unavailable on Cardenza");
+        return;
+    }
     thereminLostConnection=false;   // a fresh probe supersedes the old verdict
     // The MIDI/Theremin pin conflict from v0.99910 had one gap: this
     // function is the one that actually touches GPIO1/2, but only
     // thereminToggle() suspended MIDI first. Called directly from boot
     // when a saved setting restored Theremin as already on, the UART was
-    // never suspended, and the conflict happened exactly as before — the
+    // never suspended, and the conflict happened exactly as before â€” the
     // owner's report ("worked after a second reset") is consistent with a
     // peripheral left in a bad state by that conflict rather than with
     // software alone, which a full power cycle clears and a soft reset may
     // not (v0.99911).
     //
-    // Suspending here instead of at each caller means every path — boot,
-    // the toggle, Rescan — is covered by the one place that owns the pins.
+    // Suspending here instead of at each caller means every path â€” boot,
+    // the toggle, Rescan â€” is covered by the one place that owns the pins.
     // Failing to find a sensor gives MIDI back immediately: there is no
     // reason to keep it suspended for a bus nothing is using.
-    // Only Grove actually conflicts with MIDI's pins — Cap shares an
+    // Only Grove actually conflicts with MIDI's pins â€” Cap shares an
     // entirely different bus (G8/9) and never touches GPIO1/2 at all
     // (v0.99922). Suspending unconditionally meant restoring a saved
     // Theremin-ON state on the CAP bus silenced MIDI at boot for no
     // reason: nothing was ever going to collide, so there was nothing to
     // protect against. This is very likely what the owner's Cap+Grove-MIDI
-    // test actually hit — MIDI came back only after happening to toggle
+    // test actually hit â€” MIDI came back only after happening to toggle
     // Theremin off and on, which is a coincidence of a different bug
     // (tofPresent not being cleared on OFF skipped the re-probe on ON, so
     // MIDI was never re-suspended the second time) rather than a real fix.
     if(tofBusIndex==0)midiSerialSuspend();
 
     // Reset, or a rescan adds to the previous count instead of replacing
-    // it — which is why the row climbed by six every press (v0.99903).
+    // it â€” which is why the row climbed by six every press (v0.99903).
     tofScanDevices=0;
     snprintf(tofScanResult,sizeof(tofScanResult),"no i2c device");
     // Grove's pin pair could not be confirmed from documentation, and the
-    // EXT header is the other place a unit can be attached, so try both —
+    // EXT header is the other place a unit can be attached, so try both â€”
     // still once per call, with a definite end.
     // Grove only, both orders (v0.99908). The EXT header's pins were in
     // this list on the chance a unit was attached there, but configuring
     // I2C on pins that may be wired to something else is a real risk for
-    // no benefit — the sensor was found on Grove, and a board with no
+    // no benefit â€” the sensor was found on Grove, and a board with no
     // sensor at all was misbehaving.
     static const int PIN_PAIRS[][2]={{CPS_TOF_SDA_PIN,CPS_TOF_SCL_PIN},
                                      {CPS_TOF_SCL_PIN,CPS_TOF_SDA_PIN}};
@@ -7780,21 +7790,21 @@ void thereminBegin(){
         return;
     }
     // Short mode: less range than this sensor can do, but far better
-    // immunity to ambient light and a faster update — a theremin is played
+    // immunity to ambient light and a faster update â€” a theremin is played
     // within arm's reach, and latency matters more than reach.
     tofSensor.setDistanceMode(VL53L1X::Short);
     // The measurement takes 20ms, so the repeat interval has to be longer
     // than that (v0.99905). Setting both to 20 left no gap: the sensor was
     // asked for a new reading before it had finished the last, so it
     // returned stale or invalid data. That is why the pitch froze at
-    // whatever height the hand first appeared at — only the first
+    // whatever height the hand first appeared at â€” only the first
     // measurement of each pass was real.
     tofSensor.setMeasurementTimingBudget(20000);
     tofSensor.startContinuous(33);
     // Discard the first several readings after (re)starting continuous
     // mode (v0.99911). VL53L1X datasheets note the first measurements
     // after a mode/timing change can be unreliable while the sensor
-    // settles, and a stray reading here is a stray note at connect time —
+    // settles, and a stray reading here is a stray note at connect time â€”
     // the 1-2 seconds of pitch reported with nothing in the sensor's field
     // matches roughly this many 33ms cycles. Counted down in
     // thereminUpdate() rather than delay()'d here, so boot is not blocked.
@@ -7811,19 +7821,19 @@ void thereminBegin(){
 // counted consecutive did_timeout flags, and the count never advanced no
 // matter how long the "i2cRead Error 263" stream ran. The reason is in
 // Pololu's own source: did_timeout is only ever set inside read(true)'s
-// blocking wait loop —
+// blocking wait loop â€”
 //
 //   if (blocking) { startTimeout(); while (!dataReady()) {
 //       if (checkTimeoutExpired()) { did_timeout = true; return 0; } } }
 //
-// — and this code calls read(false), the non-blocking form, specifically
+// â€” and this code calls read(false), the non-blocking form, specifically
 // so a stalled sensor cannot block the main loop. That path skips the
 // loop entirely, so did_timeout is never touched here regardless of
 // whether the underlying I2C transaction succeeded. The counter was
 // watching a flag that this call was never going to set; it was not that
 // failures were rare, it was that none of them were being counted at all.
 // Which also means the Grove-only bus-conflict theory this was chasing
-// may never have been necessary — a connector or cable that glitches
+// may never have been necessary â€” a connector or cable that glitches
 // occasionally is enough on its own once failures go uncounted forever.
 //
 // So this tracks the one thing read(false) actually can't hide: how long
@@ -7836,7 +7846,7 @@ constexpr unsigned long THEREMIN_LOST_MS=3000;
 // a flat chromatic semitone (v0.99918).
 //
 // Chromatic snapping made every scale sound the same through the
-// theremin, which defeats the point of having set one in Play Style —
+// theremin, which defeats the point of having set one in Play Style â€”
 // Semitone mode existed to make the instrument playable in tune, and
 // "in tune" should mean the scale the rest of the synth is using, not
 // every semitone regardless of it. EZ Style has no Scale setting to
@@ -7844,7 +7854,7 @@ constexpr unsigned long THEREMIN_LOST_MS=3000;
 //
 // Searches every degree across a couple of octaves either side of the
 // theremin's own range and keeps the closest, the same brute-force
-// approach recomputeKeyNotes() already uses for the keyboard rows — at
+// approach recomputeKeyNotes() already uses for the keyboard rows â€” at
 // under a dozen scale degrees and a handful of octaves, cheap enough for
 // every 33ms reading.
 float thereminQuantizeToHz(float hz,float topHz){
@@ -7881,8 +7891,8 @@ void thereminUpdate(){
         // frequent enough that a reconnect is noticed quickly without
         // costing meaningful CPU time in between attempts.
         //
-        // Bounded now (v0.99944): with no unit plugged in at all — not a
-        // transient hiccup, just Theremin left ON from a saved setting —
+        // Bounded now (v0.99944): with no unit plugged in at all â€” not a
+        // transient hiccup, just Theremin left ON from a saved setting â€”
         // this retried forever, spamming "no sensor found" every 500ms
         // with no way to stop it short of the SETTING menu. 40 attempts
         // (~20s) is enough to catch a genuine reconnect but not so long
@@ -7905,13 +7915,13 @@ void thereminUpdate(){
 
     // "Still talking to the sensor" and "a target is in range" are
     // different questions, and v0.99917 conflated them (v0.99919). A
-    // RangeStatus other than Valid — nothing detected, a weak signal — is
+    // RangeStatus other than Valid â€” nothing detected, a weak signal â€” is
     // a completely ordinary result: it is what a working sensor reports
     // whenever nothing is in front of it, which happens constantly during
     // normal playing (a hand lifted between notes, adjusting position).
     // Feeding that into the same watchdog as a genuine communication
     // failure meant a few seconds of ordinary silence disabled Theremin
-    // outright — on Grove AND on Cap alike, since this was a logic error
+    // outright â€” on Grove AND on Cap alike, since this was a logic error
     // with nothing to do with which bus was in use, and unaffected by
     // reseating any cable.
     //
@@ -7925,7 +7935,7 @@ void thereminUpdate(){
         bool pastGrace=(millis()-thereminEnabledAtMs>=THEREMIN_STARTUP_GRACE_MS);
         if(pastGrace&&millis()-thereminLastGoodMs>=THEREMIN_LOST_MS&&!thereminLostConnection){
             // Marked lost, but Theremin itself is left ON and kept polling
-            // below — no manual toggle required to recover (v0.99922).
+            // below â€” no manual toggle required to recover (v0.99922).
             // Requiring one meant a brief real hiccup needed the same
             // fix as a genuine unplug, and the owner asked, reasonably,
             // why Grove couldn't just keep going the way Cap does. Cap's
@@ -7954,7 +7964,7 @@ void thereminUpdate(){
     // playing window" were separate tests with separate early exits, and
     // only the first reset the good-reading counter. At the edges the two
     // disagreed several times a second, so the note stopped and started
-    // repeatedly — and every restart is an ATTACK at whatever pitch the
+    // repeatedly â€” and every restart is an ATTACK at whatever pitch the
     // next reading gave, which is where the bursts of high notes came
     // from. A hand hovering at the far limit, or closer than the near
     // limit, sat exactly on that boundary.
@@ -7990,7 +8000,7 @@ void thereminUpdate(){
     // live octave/transpose (v0.9992). Deriving it from params.octaveShift
     // meant the playable range moved whenever the keyboard's own octave
     // did, and pushing the keyboard up to reach a higher theremin range
-    // pushed the KEYBOARD out of a useful register at the same time —
+    // pushed the KEYBOARD out of a useful register at the same time â€”
     // there was no way to reach a high theremin range and a comfortable
     // keyboard range together. thereminTopSemis is a plain semitone offset
     // from C4, set on its own page, unaffected by anything else in the
@@ -7999,7 +8009,7 @@ void thereminUpdate(){
     // dropped in v0.9992 because it dragged the whole theremin range
     // along with the keyboard's own register. Transpose is different: it
     // is a small, deliberate key-of-the-song shift, and a scale locked to
-    // C regardless of Transpose defeats the point of setting one — the
+    // C regardless of Transpose defeats the point of setting one â€” the
     // scale itself should move with the song's key, the same way it does
     // for the keyboard.
     float topHz=261.63f*powf(2.f,(float)thereminTopSemis/12.f)
@@ -8007,8 +8017,8 @@ void thereminUpdate(){
     float hz=topHz*powf(2.f,-t*(float)thereminOctaves);
 
     // Smoothing runs on the RAW continuous pitch, before quantizing
-    // (v0.99912). Doing it the other way — smoothing the ALREADY-snapped
-    // value — meant the output was always gliding toward whichever
+    // (v0.99912). Doing it the other way â€” smoothing the ALREADY-snapped
+    // value â€” meant the output was always gliding toward whichever
     // semitone had just been picked and never actually arrived cleanly, so
     // Semitone mode sounded like a slightly stepped version of Smooth
     // rather than like real steps. Quantizing after smoothing removes that
@@ -8043,7 +8053,7 @@ void thereminUpdate(){
 }
 
 void midiNoteOn(uint8_t note,uint8_t vel){
-    // Velocity 0 is Note Off — the convention almost every keyboard uses
+    // Velocity 0 is Note Off â€” the convention almost every keyboard uses
     // for note-off, and forgetting it leaves notes stuck on forever.
     if(vel==0){
         if(!midiStackRemove(note))return;
@@ -8078,7 +8088,7 @@ void midiNoteOff(uint8_t note){
     }
     if(!midiStackRemove(note))return;
     // Releasing the last MIDI note must not silence a note the LOCAL
-    // keyboard is still holding (v0.9986) — that was reported as the
+    // keyboard is still holding (v0.9986) â€” that was reported as the
     // built-in key's sound vanishing when the MIDI hand lifted. The local
     // key path reasserts currentFreq on its next event, so simply leaving
     // it alone is enough.
@@ -8095,7 +8105,7 @@ void midiSustainSet(bool on){
     if(on){
         // The pedal also holds notes played on the BUILT-IN keyboard
         // (v0.99863). It only deferred MIDI note-offs before, which was
-        // not a decision so much as a consequence of where the code sat —
+        // not a decision so much as a consequence of where the code sat â€”
         // and a pedal is a performance control, so it should hold whatever
         // is being played rather than only what arrived over a cable.
         //
@@ -8142,7 +8152,7 @@ void midiSustainSet(bool on){
 // Two more CC slots, but for things that TOGGLE rather than sweep:
 // portamento, hold, the arpeggiator and its latch. A knob mapped to one of
 // those would be useless, and the CC destination list is built from
-// ImuTarget, which by definition only contains continuous parameters — so
+// ImuTarget, which by definition only contains continuous parameters â€” so
 // these needed their own small list rather than being forced into it.
 //
 // Treated as momentary switches: a CC value of 64 or more is "pressed",
@@ -8172,15 +8182,15 @@ void noteHoldToggleFwd();
 // Controllers send these two different ways and neither is wrong
 // (v0.99893):
 //
-//   Momentary — a pad or pedal: 127 while held, 0 on release. The press is
+//   Momentary â€” a pad or pedal: 127 while held, 0 on release. The press is
 //   the event; the release means nothing.
-//   Latching — a button in latch mode: 127, then 0 on the NEXT press. The
+//   Latching â€” a button in latch mode: 127, then 0 on the NEXT press. The
 //   value IS the state, and both edges are events.
 //
 // Assuming momentary made a latching button need two presses per change:
 // the 0 was discarded, so only every other press did anything. Assuming
 // latching would have been just as wrong the other way, leaving a pad's
-// release to switch things off. So the mode is per slot — a sustain pedal
+// release to switch things off. So the mode is per slot â€” a sustain pedal
 // on one and a panel button on the other is an ordinary setup.
 enum class MidiSwMode : uint8_t { TOGGLE, DIRECT, MODE_COUNT };
 MidiSwMode midiSwMode[2]={MidiSwMode::TOGGLE,MidiSwMode::TOGGLE};
@@ -8189,7 +8199,7 @@ const char *midiSwModeName(MidiSwMode m){
 }
 
 // Current state of whatever a slot points at, so DIRECT can compare rather
-// than blindly set — that way it still goes through the existing toggle
+// than blindly set â€” that way it still goes through the existing toggle
 // functions and keeps all their side effects (capturing the held
 // frequency, clearing portaFreq, resetting the arp's step) instead of
 // duplicating them.
@@ -8218,11 +8228,11 @@ void midiSwitchDo(MidiSwitchFn f){
     // runs immediately; driven from MIDI nothing asked for it, so switching
     // Latch off updated the display and left the old chord arpeggiating
     // until any key happened to be pressed. Same shape as the v0.9986 fault
-    // — the arp's chord has two ways in and only one of them triggered a
+    // â€” the arp's chord has two ways in and only one of them triggered a
     // rebuild.
     //
     // Called directly for every function here, not just the latch one:
-    // they all change what should be sounding (v0.99931 — was a flag set
+    // they all change what should be sounding (v0.99931 â€” was a flag set
     // here and polled from loop(); now a direct call, since the whole
     // point of unifying the entry point was to stop needing a flag at
     // all).
@@ -8251,7 +8261,7 @@ void midiCcInApply(int slot,uint8_t val){
     ImuTarget t=midiCcInTarget[slot];
     if(t==ImuTarget::NONE)return;
     // 0-127 onto the -1..+1 the targets expect for bipolar parameters, or
-    // 0..1 for the rest — imuBipolarAuto() already knows which is which,
+    // 0..1 for the rest â€” imuBipolarAuto() already knows which is which,
     // so a CC behaves like a tilt of the same target rather than needing
     // its own rules. cfg=false because a knob has no axis to inherit an
     // inversion setting from.
@@ -8274,7 +8284,7 @@ void midiControlChange(uint8_t cc,uint8_t val){
     switch(cc){
         case CC_MODULATION:
             // Onto the vibrato OFFSET, so the menu's own vibrato setting
-            // stays the base and the wheel adds to it — exactly how the
+            // stays the base and the wheel adds to it â€” exactly how the
             // IMU targets behave.
             params.vibratoDepthOffsetTarget=(val/127.f)*MIDI_MOD_MAX_VIBRATO;
             break;
@@ -8295,7 +8305,7 @@ void midiControlChange(uint8_t cc,uint8_t val){
 }
 
 // Program Change selects a morph slot, so an external keyboard or a host
-// can change sound — and it MORPHS rather than switching, since that is
+// can change sound â€” and it MORPHS rather than switching, since that is
 // what this synth does. Programs are 1-based on most hardware and 0-based
 // in the protocol; program 0 is slot 1 here, which lines up with the
 // Shift+1..0 keys.
@@ -8328,8 +8338,8 @@ int     midiDataIdx=0,midiDataNeeded=0;
 // arpeggiator usable alongside other gear rather than only on their own.
 //
 // The protocol sends 24 clocks per quarter note. Rather than counting
-// clocks and stepping on every 24th — which locks the resolution to a
-// quarter and drifts if a clock is dropped — this measures the interval
+// clocks and stepping on every 24th â€” which locks the resolution to a
+// quarter and drifts if a clock is dropped â€” this measures the interval
 // between clocks and derives a BPM from it. The existing timing code then
 // carries on exactly as before, just reading a tempo that happens to come
 // from outside. Nothing in the sequencer had to change.
@@ -8346,7 +8356,7 @@ unsigned long midiClockAccumUs=0;
 int   midiClockCount=0;
 
 // Start/Continue/Stop drive the sequencer transport, so pressing play on
-// the master starts this too — which is the point of syncing.
+// the master starts this too â€” which is the point of syncing.
 void seqTogglePlayFwd();
 bool seqIsPlayingFwd();
 
@@ -8367,7 +8377,7 @@ void midiClockTick(){
                     // Smoothed across beats, not applied raw (v0.99932,
                     // raised v0.99933). 0.3 removed the wobble but made a
                     // deliberate tempo change on the master feel sluggish
-                    // to follow — the same filter fighting both the noise
+                    // to follow â€” the same filter fighting both the noise
                     // and the signal, since it cannot distinguish a real
                     // tempo change from beat-to-beat jitter; it can only
                     // trade how much of each gets through. 0.6 leans
@@ -8395,7 +8405,7 @@ void midiClockReset(){
 void midiProcessByte(uint8_t b){
     // Realtime messages can appear BETWEEN the data bytes of another
     // message, so they are handled here and deliberately do not touch
-    // midiStatus or midiDataIdx — treating them like any other status
+    // midiStatus or midiDataIdx â€” treating them like any other status
     // byte would corrupt whatever note was mid-transmission.
     if(b>=0xF8){
         if(!midiClockEnabled)return;
@@ -8422,7 +8432,7 @@ void midiProcessByte(uint8_t b){
             midiStatus=b; midiDataIdx=0; midiDataNeeded=2;
         } else if(hi==MIDI_PROGRAM){
             // One data byte, not two (v0.99861). Getting this wrong would
-            // not just lose Program Change — the parser would wait for a
+            // not just lose Program Change â€” the parser would wait for a
             // byte that never comes and swallow the message after it.
             midiStatus=b; midiDataIdx=0; midiDataNeeded=1;
         } else {
@@ -8445,13 +8455,13 @@ void midiProcessByte(uint8_t b){
 
 // Drain whatever has arrived. Called from loop(), not audioTask: MIDI
 // timing lives in milliseconds and the audio path must not take on work it
-// does not need. Bounded per call so a flood of data — a controller
-// sweeping a wheel, say — cannot stall the UI (v0.9961).
+// does not need. Bounded per call so a flood of data â€” a controller
+// sweeping a wheel, say â€” cannot stall the UI (v0.9961).
 // ---- Serial MIDI transport, for the M5Stack Unit MIDI (v0.998) ----
 //
 // The unit is a plain UART bridge to a pair of DIN sockets (plus a SAM2695
 // synth on the other direction, which this does not use). So MIDI IN costs
-// one HardwareSerial and nothing else — no USB stack, none of the ~19KB of
+// one HardwareSerial and nothing else â€” no USB stack, none of the ~19KB of
 // DRAM that made USB MIDI fail in v0.9962, and no reset loop.
 //
 // Wiring: HY2.0-4P Grove. Black GND, Red 5V, YELLOW is the unit's UART_RX,
@@ -8463,13 +8473,13 @@ void midiProcessByte(uint8_t b){
 // signal; in Separate that pin does nothing, which would look exactly like
 // a broken cable or wrong pin.
 //
-// Baud is 31250, the MIDI 1.0 standard. M5's spec table says 31520 — that
+// Baud is 31250, the MIDI 1.0 standard. M5's spec table says 31520 â€” that
 // is a typo in their docs, repeated in several places. 31250 is correct and
 // 31520 would be a 0.9% error, which UARTs tolerate, so the wrong figure
 // may even appear to work while being wrong.
 // There is only ONE Grove port on this board, and the ToF unit for the
 // theremin idea wants it too (I2C). The EXT 2.54-14P header carries its own
-// UART, so the two can coexist by moving one of them there — G13/G15 rather
+// UART, so the two can coexist by moving one of them there â€” G13/G15 rather
 // than G1/G2. Both options are here; define CPS_MIDI_RX_PIN/TX_PIN in
 // platformio.ini to override without touching this file.
 #ifndef CPS_MIDI_RX_PIN
@@ -8484,7 +8494,7 @@ HardwareSerial midiSerial(1);   // UART1; UART0 is the console
 bool midiSerialReady=false;
 
 // Diagnostics, because the first thing to establish tomorrow is whether
-// BYTES are arriving at all — that separates a wiring/pin/DIP problem from
+// BYTES are arriving at all â€” that separates a wiring/pin/DIP problem from
 // a parsing one, and they look identical from the outside (silence).
 volatile uint32_t midiRxBytes=0;
 unsigned long midiLastRxMs=0;
@@ -8520,6 +8530,11 @@ void midiSerialResume(){
 }
 
 void midiSerialBeginWith(int choice){
+    // GPIO1/2 are the on-board codec bus, never a default Grove UART.
+    if(M5.isCardenza() && (MIDI_PIN_CANDIDATES[choice][0]<=2 || MIDI_PIN_CANDIDATES[choice][1]<=2)) {
+        midiSerialReady=false;
+        return;
+    }
     midiSerial.end();
     midiSerial.begin(MIDI_BAUD,SERIAL_8N1,
         MIDI_PIN_CANDIDATES[choice][0],MIDI_PIN_CANDIDATES[choice][1]);
@@ -8532,6 +8547,10 @@ void midiSerialBeginWith(int choice){
 
 void midiSerialBegin(){
     midiSerialBeginWith(0);
+    if(!midiSerialReady) {
+        Serial.println("[MIDI] unavailable: default pins belong to ES8156");
+        return;
+    }
     Serial.println("[MIDI] Unit MIDI checklist: DIP switch = BYPASS,");
     Serial.println("[MIDI]   and the Grove 5V direction switch must be set");
     Serial.println("[MIDI]   to POWER OUT, or the unit gets no power at all.");
@@ -8542,17 +8561,17 @@ void midiSerialBegin(){
 // Bounded, and suspended while anything is transmitting (v0.99896).
 //
 // This was written to find which Grove pin is RX and then get out of the
-// way, but it had no way to stop when nothing ever arrives — and nothing
+// way, but it had no way to stop when nothing ever arrives â€” and nothing
 // ever arrives with the unit's DIP in Separate, where the RX pin is not
 // connected at all. So it swapped forever, every three seconds, and each
 // swap calls midiSerial.end()/begin(): the UART is torn down mid-send and
 // the TX pin moves with it. Transmission worked roughly half the time, in
-// three-second slices. That is exactly how it presented — a sequencer that
+// three-second slices. That is exactly how it presented â€” a sequencer that
 // responded sometimes and never followed the tempo.
 //
 // Two limits now. It never runs while any send feature is on, because
 // tearing down the UART to look for input is not worth breaking output
-// for. And it gives up after 30 seconds, settling on choice 0 — G1 as RX,
+// for. And it gives up after 30 seconds, settling on choice 0 â€” G1 as RX,
 // which is what the hardware actually uses.
 // Declared with the clock-out code further down, which needs the
 // sequencer state that is itself declared after this point.
@@ -8599,14 +8618,14 @@ void midiPoll(){
         //
         // The first hardware test received a steady four bytes a second
         // whether or not a key was pressed, which is what Active Sensing
-        // alone looks like — 0xFE every ~250ms, exactly what a Roland
+        // alone looks like â€” 0xFE every ~250ms, exactly what a Roland
         // sends to say it is still there. So the cable, the unit, the DIP
         // switch, the pin and the baud rate are all proven correct, and
         // the notes are simply not being transmitted.
         //
         // Filtering out 0xFE leaves a log that is silent until something
         // real arrives, so pressing one key either prints bytes or prints
-        // nothing — and that distinguishes "the keyboard is not sending"
+        // nothing â€” and that distinguishes "the keyboard is not sending"
         // from "the parser is not understanding" without guessing.
         midiProcessByte(b);
     }
@@ -8639,7 +8658,7 @@ void midiDiagTick(){
 }
 
 // Force-retriggers the envelope for this step, even if the frequency
-// happens to repeat — that's what gives the arpeggio its percussive,
+// happens to repeat â€” that's what gives the arpeggio its percussive,
 // stepped character rather than a smooth glide between notes.
 void triggerArpStep(float freq){
     currentFreq=freq;
@@ -8665,7 +8684,7 @@ void updateArpTiming(){
     if(arpHeldCount==0){
         // Same exception as the plain note path (v0.9983): with the
         // arpeggiator on and no chord held locally, this ran every loop
-        // and zeroed currentFreq — which silenced MIDI notes continuously
+        // and zeroed currentFreq â€” which silenced MIDI notes continuously
         // rather than just on a key event.
         if(currentFreq!=0.f&&!midiNoteActive)currentFreq=0.f; // let it release naturally
         return;
@@ -8673,7 +8692,7 @@ void updateArpTiming(){
     unsigned long now=millis();
     // External clock overrides the local tempo when it is running
     // (v0.9989). The IMU/CC offset still applies on top, so a tilt can
-    // push against the incoming tempo — which is a deliberate effect
+    // push against the incoming tempo â€” which is a deliberate effect
     // rather than a conflict, and costs nothing to allow.
     float baseBpm=(midiClockEnabled&&midiClockLocked)?midiClockBpm:arpTempoBpm;
     float bpm=constrain(baseBpm+arpTempoOffset,40.f,240.f);
@@ -8684,10 +8703,10 @@ void updateArpTiming(){
     // feel); negative pushes it earlier instead (anticipated/"pushed" feel).
     float stepMs=isOffBeat?baseStepMs*(1.f+swingFactor*0.5f):baseStepMs*(1.f-swingFactor*0.5f);
     // The [arpTiming] diagnostic that used to sit here (v0.9997x) is
-    // retired (UI/UX diagnostic pass) — it did its job: confirmed
+    // retired (UI/UX diagnostic pass) â€” it did its job: confirmed
     // stepMs/bpm/arpRateIndex stay healthy even during a freeze, which
     // ruled out this function as the cause and pointed to the actual
-    // one — the Cardputer ADV's TCA8418 keyboard chip, a hardware/library
+    // one â€” the Cardputer ADV's TCA8418 keyboard chip, a hardware/library
     // quirk outside this file, mitigated by the keyboard watchdog rather
     // than fixable here. No ongoing reason to print this every second.
     if(now-arpLastStepMs>=(unsigned long)stepMs){
@@ -8703,14 +8722,14 @@ void updateArpTiming(){
 
 // ---------------------------------------------------------
 // Step Sequencer (16 steps, CardputerADV only for hardware auto-detect
-// purposes only — the Sequencer itself works on both boards). Has its
+// purposes only â€” the Sequencer itself works on both boards). Has its
 // own independent Tempo/Swing, separate from the Arpeggiator's.
 // ---------------------------------------------------------
 struct SeqStep {
     float freq=0.f;       // 0 = rest
     uint8_t velocity=100; // base velocity; Accent boosts this further
-    bool tie=false;       // extend the previous note — no retrigger, no pitch change
-    bool slide=false;     // glide from the previous pitch to this one — no retrigger
+    bool tie=false;       // extend the previous note â€” no retrigger, no pitch change
+    bool slide=false;     // glide from the previous pitch to this one â€” no retrigger
     bool accent=false;    // boost velocity + filter cutoff for this step
 };
 constexpr int SEQ_NUM_STEPS=16;
@@ -8719,7 +8738,7 @@ int  seqCursorStep=0;    // which step is being edited
 int  seqPlayStep=0;      // current playback position
 bool seqPlaying=false;
 // Two separate editing "focuses": STEP (this step's Velocity/Gate) and
-// PATTERN (the whole sequence's Tempo/Swing) — kept conceptually separate
+// PATTERN (the whole sequence's Tempo/Swing) â€” kept conceptually separate
 // per user feedback, rather than one flat 4-way cycle. 'b' toggles focus;
 // 'g' cycles the 2-way choice within whichever focus is currently active.
 // All four values (Vel/Gate/Tempo/Swing) are always shown on screen
@@ -8740,13 +8759,13 @@ bool prevSeqGateKeyPressed=false, prevSeqPlayKeyPressed=false;
 float seqTempoBpm=120.0f; // 40-240, independent of Arp's Tempo
 uint8_t seqLastUsedVelocity=100; // carries forward to new note entries, so you're not stuck starting at 100 every time
 
-// Song playback (declared early — updateSeqTiming() below reads these to
+// Song playback (declared early â€” updateSeqTiming() below reads these to
 // apply per-entry Transpose and detect when to advance to the next
 // entry; the rest of Song's state/logic lives further down near its
 // data model and editor UI).
 bool  songPlaying=false;
 float songTransposeMult=1.0f; // current entry's chromatic Transpose, applied on top of each step's stored freq
-void  songAdvanceOnPassComplete(); // forward declaration — defined near the rest of Song's playback logic below
+void  songAdvanceOnPassComplete(); // forward declaration â€” defined near the rest of Song's playback logic below
 
 // Copy/Cut/Paste: 'V' marks/confirms a step-range selection, Shift+C
 // copies it, Shift+X cuts it, Enter pastes at the cursor. seqSelStart/End
@@ -8786,7 +8805,7 @@ void seqTogglePlayFwd(){seqTogglePlay();}
 // of setting it. Placed here rather than with the other send code because
 // it needs seqPlaying and the tempos, which are declared just above.
 //
-// Note this only reaches external gear with the unit's DIP in Separate —
+// Note this only reaches external gear with the unit's DIP in Separate â€”
 // in Bypass the controller's TX goes to the SAM2695 alone. The chip
 // ignores clock, so sending it there is harmless, just pointless.
 bool midiClockOutEnabled=false;
@@ -8805,7 +8824,7 @@ void midiClockOutUpdate(){
     // asked for it explicitly.
     if(midiClockEnabled&&midiClockLocked){midiClockOutNextUs=0;return;}
 
-    // Transport, so pressing play here starts the other machine — the same
+    // Transport, so pressing play here starts the other machine â€” the same
     // courtesy clock in extends to us.
     if(seqPlaying!=midiClockOutWasPlaying){
         midiClockOutWasPlaying=seqPlaying;
@@ -8828,14 +8847,14 @@ void midiClockOutUpdate(){
         midiSendRealtime(0xF8);
         midiClockOutNextUs+=usPerClock;
     }
-    // If it fell far behind — a long redraw, a card write — give up on the
+    // If it fell far behind â€” a long redraw, a card write â€” give up on the
     // missed clocks instead of firing a burst that would sound like a
     // stumble at the receiving end.
     if(guard>=8)midiClockOutNextUs=now+usPerClock;
 }
 
 // Reuses the existing note-key tables directly (not resolveFreqFromKeys(),
-// since that treats Backspace as a 13th note — here Backspace instead
+// since that treats Backspace as a 13th note â€” here Backspace instead
 // means "clear the selected step", handled separately below).
 float seqResolveFreqExcludingDel(){
     auto s=M5Cardputer.Keyboard.keysState();
@@ -8891,13 +8910,13 @@ void updateSeqEditing(){
     }
     if(markKey&&!prevSeqMarkKeyPressed){
         if(seqSelAnchor<0){
-            // No selection yet — start marking from here.
+            // No selection yet â€” start marking from here.
             seqSelAnchor=seqCursorStep; seqSelStart=seqSelEnd=seqCursorStep; seqSelMarking=true;
         } else if(seqSelMarking){
-            // Currently marking — confirm/freeze the current range.
+            // Currently marking â€” confirm/freeze the current range.
             seqSelMarking=false;
         } else {
-            // Already confirmed — clear it.
+            // Already confirmed â€” clear it.
             seqSelAnchor=seqSelStart=seqSelEnd=-1;
         }
     }
@@ -8937,7 +8956,7 @@ void updateSeqEditing(){
         SeqStep &st=seqSteps[seqCursorStep];
         switch(seqStepTarget){
             case SeqStepTarget::VELOCITY:
-                // Step 5->1, hold-to-repeat added (v0.9996x) — same
+                // Step 5->1, hold-to-repeat added (v0.9996x) â€” same
                 // request as global Volume and ARP/SEQ/SONG's Tempo/
                 // Swing. Reuses menuUpHeldMs/menuDownHeldMs, the pair
                 // that actually shares ';'/'.' with vInc/vDec here (see
@@ -8959,16 +8978,16 @@ void updateSeqEditing(){
         }
     } else {
         // Step 5->1, hold-to-repeat added (v0.9996x, corrected). Reusing
-        // menuIncHeldMs/menuDecHeldMs was WRONG — those track '/' and ','
+        // menuIncHeldMs/menuDecHeldMs was WRONG â€” those track '/' and ','
         // (updateMenuNavigation()'s mI/mDe), not ';' and '.', which is
         // what vInc/vDec actually are here. updateMenuNavigation() runs
         // unconditionally every frame regardless of appMode and clears
-        // menuIncHeldMs whenever '/' isn't down — which while holding ';'
+        // menuIncHeldMs whenever '/' isn't down â€” which while holding ';'
         // for SEQ's Tempo is always, so it zeroed the timer out from
         // under this on literally the next frame: the initial press fired
         // (menuKeyFire's own !prev branch), nothing after did. Correct
         // pairing is menuUpHeldMs (tracks ';', same key as vInc) and
-        // menuDownHeldMs (tracks '.', same key as vDec) — the reset logic
+        // menuDownHeldMs (tracks '.', same key as vDec) â€” the reset logic
         // stays in sync because it is now watching the actual key being
         // held, not an unrelated one.
         if(seqPatternTarget==SeqPatternTarget::TEMPO){
@@ -9009,7 +9028,7 @@ void updateSeqEditing(){
     // leave it as a rest, rather than pressing a note key for it).
     // MIDI notes enter steps too (v0.99891). seqResolveFreqExcludingDel()
     // reads the built-in keyboard only, so step entry silently ignored an
-    // external keyboard — the one input where being able to play the pitch
+    // external keyboard â€” the one input where being able to play the pitch
     // you want, in the octave you want, matters most, and where the
     // built-in three-key limit is least relevant.
     //
@@ -9039,7 +9058,7 @@ void updateSeqEditing(){
         }
         seqCursorStep=(seqCursorStep+1)%SEQ_NUM_STEPS;
     } else if(curFreq<=0.f&&prevSeqEntryFreq>0.f&&!seqPlaying){
-        // Key released — stop the preview.
+        // Key released â€” stop the preview.
         currentFreq=0.f;
     }
     prevSeqEntryFreq=curFreq;
@@ -9059,12 +9078,12 @@ void updateSeqTiming(){
         SeqStep &st=seqSteps[seqPlayStep];
         float tMult=songPlaying?songTransposeMult:1.0f; // Song's per-entry chromatic Transpose; 1.0 (no-op) outside Song playback
         if(st.tie&&currentFreq>0.f){
-            // Extend the currently-sounding note — no retrigger, no pitch
+            // Extend the currently-sounding note â€” no retrigger, no pitch
             // change, no envelope reset. Checked before the Rest check
-            // below so a Tie step doesn't need its own note assigned —
+            // below so a Tie step doesn't need its own note assigned â€”
             // it just continues whatever's already sounding.
         } else if(st.freq<=0.f){
-            // Rest — silence, let the amp envelope's own Release handle the tail.
+            // Rest â€” silence, let the amp envelope's own Release handle the tail.
             currentFreq=0.f;
             seqSliding=false;
             seqAccentCutoffBoostTarget=0.f;
@@ -9076,14 +9095,14 @@ void updateSeqTiming(){
             seqAccentCutoffBoostTarget=st.accent?SEQ_ACCENT_CUTOFF_BOOST:0.f;
             seqAccentResoBoostTarget=st.accent?SEQ_ACCENT_RESO_BOOST:0.f;
             if(st.slide&&currentFreq>0.f){
-                // Glide from the current pitch to the new one — no
+                // Glide from the current pitch to the new one â€” no
                 // retrigger, so the envelope/amplitude just continues.
                 seqSlideFreq=currentFreq;
                 seqSliding=true;
                 currentFreq=st.freq*tMult;
             } else {
                 // Normal note-on (or a tie/slide with nothing previously
-                // sounding to extend/glide from) — full retrigger.
+                // sounding to extend/glide from) â€” full retrigger.
                 seqSliding=false;
                 currentFreq=st.freq*tMult;
                 if(envPhase==EnvPhase::IDLE)envLevel=0.f;
@@ -9100,18 +9119,18 @@ void updateSeqTiming(){
 //
 // Shift+Enter, tracked here rather than inside a menu, so it works from
 // PLAY and SEQ without spending one of the few keys those screens still
-// have free — the request that made this worth doing. Sets whichever
+// have free â€” the request that made this worth doing. Sets whichever
 // tempo is actually in use: seqTempoBpm while SEQ is playing, arpTempoBpm
 // otherwise, matching how the two are already independent everywhere
 // else in this firmware.
 //
 // Each tap after the first computes an instantaneous BPM from the gap
-// since the last one and blends it into a running average — a single
+// since the last one and blends it into a running average â€” a single
 // gap is accepted immediately (there is nothing to average yet), but a
 // human tapping a beat is never perfectly even, and averaging the last
 // few intervals is what every hardware tap-tempo button actually does.
 // A tap more than 2 seconds after the last one starts a new average
-// rather than blending against a stale one — indistinguishable from
+// rather than blending against a stale one â€” indistinguishable from
 // deciding to tap a new, much slower tempo otherwise.
 bool  tapTempoActive=false;
 unsigned long tapTempoLastMs=0;
@@ -9159,22 +9178,22 @@ void updateOctaveAndVolume(){
                 if(c=='/')trU=true; if(c==',')trD=true;
             }
             if(s.shift&&c=='v')arpToggleKey=true; // Shift+V: Arp on/off, from anywhere except Patch
-            else if(c=='v'&&appMode!=AppMode::SEQ)latchKey=true; // V (unshifted): Arp latch toggle — in SEQ, plain V instead marks/confirms a step selection (see updateSeqEditing())
+            else if(c=='v'&&appMode!=AppMode::SEQ)latchKey=true; // V (unshifted): Arp latch toggle â€” in SEQ, plain V instead marks/confirms a step selection (see updateSeqEditing())
             if(c=='V')arpToggleKey=true;          // defensive: in case shifted letters are reported uppercase directly
         } else {
             // Original Cardputer: ;/./,// are reserved for PAD (virtual
             // tilt) control instead, so octave/transpose move to keys
-            // that don't collide with that — nor with SEQ's own keys.
+            // that don't collide with that â€” nor with SEQ's own keys.
             if(c=='j')oU=true;  if(c=='n')oD=true;
             if(c=='m')trU=true; if(c=='b')trD=true;
         }
         // Shift+L/Shift+S are reserved for SONG's Load/Save (see
-        // updateSongEditor()) — skip the plain volume/IMU-hold meaning
+        // updateSongEditor()) â€” skip the plain volume/IMU-hold meaning
         // there so they don't also fire alongside Load/Save.
-        // Volume itself moved out to updateVolumeRepeat() (v0.9996x) —
+        // Volume itself moved out to updateVolumeRepeat() (v0.9996x) â€”
         // no longer collected here at all; see that function.
         // Shift+C/Shift+X are reserved for SEQ's Copy/Cut (see
-        // updateSeqEditing()) — skip the plain portamento/bend meaning
+        // updateSeqEditing()) â€” skip the plain portamento/bend meaning
         // there so they don't also fire alongside Copy/Cut.
         if(c=='z')bD=true;
         if(c=='x'&&!(appMode==AppMode::SEQ&&s.shift))bU=true;
@@ -9183,7 +9202,7 @@ void updateOctaveAndVolume(){
         // toggle it has always been.
         //
         // The keyboard reports the SHIFTED character, so a shifted A
-        // arrives as 'A' and not as 'a' with s.shift set — testing s.shift
+        // arrives as 'A' and not as 'a' with s.shift set â€” testing s.shift
         // alone never fired (v0.9922). Shift+V had a note about exactly
         // this and a defensive uppercase test; that lesson did not get
         // carried over here. Both forms are accepted now.
@@ -9195,14 +9214,14 @@ void updateOctaveAndVolume(){
         }
         if(c=='d')nH=true;
         if(c=='c'&&!(appMode==AppMode::SEQ&&s.shift))pOn=true;
-        // H alone still shows the overlay only while held — that can never
+        // H alone still shows the overlay only while held â€” that can never
         // strand you, since letting go always closes it. Shift+H latches it
         // so it can be read hands-free. Uppercase accepted for the same
         // reason as A/S above (v0.9922).
         if(c=='H'||(c=='h'&&s.shift))hLatchKey=true;
         else if(c=='h')hKey=true;
         // Shift+1..0 fires a patch morph (v0.995). The keyboard reports
-        // the SHIFTED character, so a shifted 1 arrives as '!' — the same
+        // the SHIFTED character, so a shifted 1 arrives as '!' â€” the same
         // lesson as Shift+A arriving as 'A' (v0.9922). Both forms are
         // accepted, since the digit-with-shift path is what some layouts
         // produce. Digits alone stay note keys, untouched.
@@ -9291,7 +9310,7 @@ void updateOctaveAndVolume(){
 
     void portaToggle();   // defined with the other menu actions further down
 // Portamento toggle (C key). Calls the shared helper rather than
-    // repeating its body — with the menu row gone (v0.994) this is the only
+    // repeating its body â€” with the menu row gone (v0.994) this is the only
     // caller, and two copies of the same two lines is how they drift.
     if(pOn&&!prevPortaPressed)portaToggle();
     prevPortaPressed=pOn;
@@ -9300,13 +9319,13 @@ void updateOctaveAndVolume(){
     if(latchKey&&!prevArpLatchPressed)arpLatchToggle();
     prevArpLatchPressed=latchKey;
 
-    // Arp on/off toggle (Shift+V, ADV only) — usable anywhere except
+    // Arp on/off toggle (Shift+V, ADV only) â€” usable anywhere except
     // Patch. This is now the ONLY way to toggle it (the redundant
     // SETTING > Arp entry was removed once this covered every screen).
     if(arpToggleKey&&!prevArpToggleKeyPressed)arpToggle();
     prevArpToggleKeyPressed=arpToggleKey;
 
-    // Sequencer Play/Stop (Space) — usable anywhere except Patch/SEQ
+    // Sequencer Play/Stop (Space) â€” usable anywhere except Patch/SEQ
     // itself (which has its own handling), so playback can be started
     // or stopped while tweaking VCO/VCF/etc without going back to SEQ.
     if(seqPlayKey&&!prevSeqPlayKeyPressedGlobal)seqTogglePlay();
@@ -9318,7 +9337,7 @@ void updateOctaveAndVolume(){
 
 // The hold toggle as a callable, for the MIDI switch slots (v0.99892).
 // Mirrors what the H key does, including capturing the frequency, rather
-// than just flipping the flag — a Hold with no note captured does nothing.
+// than just flipping the flag â€” a Hold with no note captured does nothing.
 void noteHoldToggleFwd(){
     noteHeld=!noteHeld;
     if(noteHeld)heldFreq=(playingFreq>0)?playingFreq:currentFreq;
@@ -9332,10 +9351,10 @@ void noteHoldToggleFwd(){
 // The Cap LoRa-1262's own SPI chip select, GPIO5 (v0.99916). Confirmed
 // from M5's own Cap LoRa868/1262 tutorial: "SX1262 PIN NSS, IRQ, RST,
 // BUSY" constructed as Module(GPIO_NUM_5, GPIO_NUM_4, GPIO_NUM_3,
-// GPIO_NUM_6) — NSS is the chip select, and it is GPIO5.
+// GPIO_NUM_6) â€” NSS is the chip select, and it is GPIO5.
 //
 // This firmware never touches it, so with the Cap attached it is left
-// floating. SPI is a shared bus by design — every device's CS has to be
+// floating. SPI is a shared bus by design â€” every device's CS has to be
 // held deselected (HIGH, active-low being the near-universal convention)
 // or it may respond to traffic meant for someone else. A floating CS on
 // the LoRa chip is exactly that: it can read as asserted, and the SX1262
@@ -9343,7 +9362,7 @@ void noteHoldToggleFwd(){
 // and crc errors from the very first command. The owner's observation
 // that the Launcher mounts the SD fine with the Cap attached, on the
 // same cold boot, is what points here rather than back at electrical
-// interference — the Launcher almost certainly deselects this pin as
+// interference â€” the Launcher almost certainly deselects this pin as
 // part of supporting the Cap's family of expansion modules, and nothing
 // here ever did.
 constexpr int CAP_LORA_CS_PIN=5;
@@ -9358,12 +9377,12 @@ bool initSDCard(){
     // An extra settle delay on a genuinely cold boot only (v0.99913). The
     // owner reported the card failing to mount when the board is powered
     // on directly with the LoRa Cap attached, but mounting fine when
-    // launched through the Launcher — and those two differ in exactly
+    // launched through the Launcher â€” and those two differ in exactly
     // this respect: a direct power-on has to establish 3.3V from nothing,
     // while power is already stable by the time the Launcher hands off to
     // an app. A LoRa module's inrush current is the kind of load that
     // dips a rail right at power-on, for long enough to make the SD
-    // negotiate in the first tens of milliseconds harder than usual — and
+    // negotiate in the first tens of milliseconds harder than usual â€” and
     // that is exactly the window the retry above already handles for a
     // marginal card, but was not designed to cover a marginal RAIL. Two
     // different problems that fail the same way.
@@ -9376,12 +9395,12 @@ bool initSDCard(){
     // Retry, and drop the clock on the way (v0.9953). A single attempt at
     // 25MHz was the whole of it before, so one marginal mount meant every
     // setting silently loaded as default and every save failed with "File
-    // system is not mounted" — with nothing on screen to say the card had
+    // system is not mounted" â€” with nothing on screen to say the card had
     // not come up. Cards vary in how fast they will negotiate straight
     // after power-on; 25 then 16 then 4MHz costs a few milliseconds in the
     // bad case and nothing at all in the good one.
     // One more, slower rate added for CRC errors that keep recurring
-    // through the whole sequence (v0.99914) — persistent crc errors at
+    // through the whole sequence (v0.99914) â€” persistent crc errors at
     // every rate, all the way through the retry window, look like
     // continuous interference on the SPI lines rather than a one-off
     // startup transient. That is a wiring/shielding question this retry
@@ -9415,14 +9434,14 @@ const char *filterTypeName(FilterType t){
 }
 
 // Writes just the Sequencer pattern fields (tempo/swing/16 steps) to an
-// already-open file — shared by the main settings save and Pattern Bank
+// already-open file â€” shared by the main settings save and Pattern Bank
 // slot saves, so the exact field format only needs to be defined once.
 // Settings are built in RAM and written to the card in one go (v0.9913).
 //
 // This used to be ~100 separate f.printf() calls straight to the File, and
 // each one reaches the FAT layer and the SPI driver on its own. On the
 // buffer where a save landed, audioTask's worst case jumped from the usual
-// ~22-23ms to 31ms — well past the 23.22ms budget — and the surrounding
+// ~22-23ms to 31ms â€” well past the 23.22ms budget â€” and the surrounding
 // second logged several late buffers. Assembling the text first turns all
 // of that into a single write, so the card is touched once, not a hundred
 // times.
@@ -9432,7 +9451,7 @@ const char *filterTypeName(FilterType t){
 char settingsBuf[SETTINGS_BUF_SIZE];
 int  settingsBufLen=0;
 void sbReset(){settingsBufLen=0;settingsBuf[0]=0;}
-// Stops appending if the buffer fills rather than overflowing —
+// Stops appending if the buffer fills rather than overflowing â€”
 // saveSettingsToFile() checks the length afterwards and refuses to write a
 // truncated file, which is far better than writing a corrupt one.
 void sbAppend(const char *fmt,...){
@@ -9444,14 +9463,14 @@ void sbAppend(const char *fmt,...){
 }
 
 // Bumped only when the MEANING of the stored keys changes, not per
-// release — see the stamp written in saveSettingsToFile().
+// release â€” see the stamp written in saveSettingsToFile().
 constexpr int CPS_PATCH_FORMAT = 1;
 
 // Write-side mirror of loadingPatch (v0.9971). If a key is ignored when a
 // patch is LOADED, writing it into the patch was pointless: it bloats a
 // file people are about to share, and invites the obvious question of why
 // someone else's morph-slot assignments are sitting inside a sound. Kept
-// as a separate flag rather than one shared "patch mode" — loading and
+// as a separate flag rather than one shared "patch mode" â€” loading and
 // saving happen at different moments and conflating them would be a bug
 // waiting to happen.
 bool savingPatch=false;
@@ -9483,7 +9502,7 @@ bool saveSettingsToFile(const char *path){
     sbReset();
     sbAppend("{\n");
     // Format stamp (v0.997). Patches are about to be shared between people
-    // — posted on Reddit and dropped into /CPS/Patch — and until now a
+    // â€” posted on Reddit and dropped into /CPS/Patch â€” and until now a
     // file said nothing about what wrote it. A reader that finds no
     // cps_format at all knows the file predates this, which is itself
     // useful; one that finds a HIGHER number than it understands can say
@@ -9515,7 +9534,7 @@ bool saveSettingsToFile(const char *path){
     sbAppend("  \"bend_max_cents\": %.2f,\n",keyBendMaxCents);
     sbAppend("  \"bend_attack\": %.6f,\n",keyBendAttackSmooth);
     sbAppend("  \"bend_release\": %.6f,\n",keyBendReleaseSmooth);
-    if(!savingPatch){   // performance/operational, not the sound —
+    if(!savingPatch){   // performance/operational, not the sound â€”
                          // requested explicitly alongside Arp above,
                          // same reasoning (v0.9996x).
         sbAppend("  \"porta_enabled\": %d,\n",(int)portaEnabled);
@@ -9594,12 +9613,12 @@ bool saveSettingsToFile(const char *path){
         sbAppend("  \"midi_sw0m\": %u,\n",(unsigned)midiSwMode[0]);
         sbAppend("  \"midi_sw1m\": %u,\n",(unsigned)midiSwMode[1]);
     }
-    if(!savingPatch){   // playing style, not sound — see the load side
+    if(!savingPatch){   // playing style, not sound â€” see the load side
         sbAppend("  \"drift_on\": %d,\n",(int)analogDriftOn);
         sbAppend("  \"drift_amt\": %.2f,\n",analogDriftAmount);
     }
-    // Morph slots and their timing describe THIS device's setup — which
-    // ten sounds are on the number keys — not a sound. They stay in
+    // Morph slots and their timing describe THIS device's setup â€” which
+    // ten sounds are on the number keys â€” not a sound. They stay in
     // settings.json and out of patches (v0.9971).
     if(!savingPatch){
         sbAppend("  \"morph_time\": %.2f,\n",morphTimeSec);
@@ -9616,7 +9635,7 @@ bool saveSettingsToFile(const char *path){
         sbAppend("  \"play_mode\": %u,\n",(unsigned)playMode);
         sbAppend("  \"scale\": %d,\n",currentScaleIndex);
     }
-    if(!savingPatch){   // performance/operational, not the sound — same
+    if(!savingPatch){   // performance/operational, not the sound â€” same
                          // reasoning as key_volume/play_mode/scale above
                          // (v0.9996x). Requested explicitly: Arp's own
                          // on/off, type and Tempo/Swing/Rate are things
@@ -9778,7 +9797,7 @@ void parseSettingLine(const String &line){
     else if(key=="morph_time"){if(!loadingPatch)morphTimeSec=constrain(v,0.f,10.f);}
     else if(key.startsWith("morph_slot")&&!loadingPatch){
         // String-valued, so it needs the quotes stripped rather than
-        // toFloat() — the only key here that is not a number (v0.995).
+        // toFloat() â€” the only key here that is not a number (v0.995).
         int idx=key.substring(10).toInt();
         int a1=vs.indexOf('"'),a2=vs.lastIndexOf('"');
         if(idx>=0&&idx<NUM_MORPH_SLOTS&&a1>=0&&a2>a1)
@@ -9797,7 +9816,7 @@ void parseSettingLine(const String &line){
         if(!loadingPatch)params.keyVolume=constrain(v,0.f,1.f);
     }
     // Play Style, Scale and Drift are session settings, not part of a
-    // sound — the same reasoning as key_volume above (v0.9956). A patch
+    // sound â€” the same reasoning as key_volume above (v0.9956). A patch
     // that silently flips the keyboard into Pro Style on a different
     // scale, or switches the tuning instability on, changes how the
     // instrument PLAYS rather than how it sounds. settings.json still
@@ -9817,7 +9836,7 @@ void parseSettingLine(const String &line){
     }
     // The sequencer pattern is NOT part of a sound (v0.997). Save writes
     // the whole synth state to both settings.json and patch files through
-    // one function, so every patch carries all sixteen steps — meaning
+    // one function, so every patch carries all sixteen steps â€” meaning
     // auditioning someone else's patch silently replaced the pattern you
     // were working on. Patterns have their own save/load in the Pattern
     // bank; that is where they belong.
@@ -9852,7 +9871,7 @@ bool loadSettingsFromFile(const char *path,bool resetFirst=false);
 // which is always written by the current firmware and always complete.
 // It is wrong for a patch: a patch saved before oscillator 2, the Morph
 // chain or the FX tab existed has no keys for them, so loading it left
-// whatever happened to be set at the time — you got the old patch's tone
+// whatever happened to be set at the time â€” you got the old patch's tone
 // plus the current patch's oscillator 2, Morph chain and effects mixed
 // together (v0.9932).
 //
@@ -9883,11 +9902,11 @@ bool loadSettings(){return loadSettingsFromFile(SETTINGS_FILE_PATH);}
 // ---------------------------------------------------------
 // Pattern Bank: 8 lettered banks (A-H) x 8 numbered slots (1-8) = 64
 // pattern slots, each a saved 16-step Sequencer pattern (steps + tempo +
-// swing — the same fields as the main settings file's seq_*/seqN_*
+// swing â€” the same fields as the main settings file's seq_*/seqN_*
 // entries, just scoped to one file per slot under /CPS/Pattern instead
 // of the whole synth's live state). Save reuses writeSeqPatternFields();
 // load reuses parseSettingLine() line-by-line, since the field names are
-// identical — a pattern file is really just a tiny settings file that
+// identical â€” a pattern file is really just a tiny settings file that
 // only touches Sequencer fields.
 // ---------------------------------------------------------
 static const char *PATTERN_FOLDER_PATH = "/CPS/Pattern";
@@ -9909,7 +9928,7 @@ bool patternSlotExists(int bank,int slot){
 // Cached occupancy for the 8x8 grid (v0.9926).
 //
 // drawPatternBankScreen() called patternSlotExists() for every cell, so
-// every redraw of that screen meant 64 SD.exists() calls — 64 card
+// every redraw of that screen meant 64 SD.exists() calls â€” 64 card
 // transactions, several times a second. That is why the grid crawled under
 // the cursor keys, and why opening it during playback dragged the tempo
 // down: the card work was blocking long enough to interfere with the audio
@@ -9926,7 +9945,7 @@ void refreshPatternSlotCache(){
 
 bool savePatternToSlot(int bank,int slot){
     if(!ensurePatternFolder()){Serial.println("[Pattern] folder create failed");return false;}
-    // Same single-write treatment as the settings file (v0.9913) — this
+    // Same single-write treatment as the settings file (v0.9913) â€” this
     // one runs on leaving SEQ, so it fires often enough to matter.
     sbReset();
     sbAppend("{\n");
@@ -9960,7 +9979,7 @@ bool deletePatternSlot(int bank,int slot){
 }
 
 // Song UI preview: reads a pattern's step shape (freq/tie/accent/slide
-// only — velocity doesn't matter for a tiny preview) into a dedicated
+// only â€” velocity doesn't matter for a tiny preview) into a dedicated
 // buffer, separate from the live seqSteps[] so scrolling through Song
 // entries in the editor never disturbs whatever's actually loaded or
 // playing. Cached by (bank,slot) so it only re-reads the SD card when
@@ -10098,10 +10117,10 @@ void updatePatternBank(){
 
 // ==========================================================
 // Song mode: arranges saved Pattern Bank patterns into a sequence for
-// playback (playback engine is a later step — this covers the data
+// playback (playback engine is a later step â€” this covers the data
 // model, save/load, and the arrangement editor). Each entry references
 // a Pattern Bank slot (bank+slot) plus a per-entry Transpose (semitones,
-// chromatic — consistent with how Octave/Transpose already works
+// chromatic â€” consistent with how Octave/Transpose already works
 // elsewhere rather than a scale-aware diatonic shift) and Repeat count
 // (how many times through before advancing). Two global settings:
 // whether each entry uses its own saved pattern's Tempo/Swing
@@ -10123,7 +10142,7 @@ bool songLoopAtEnd=true;         // true: loop back to entry 0 after the last on
 float songTempoBpm=120.0f, songSwing=0.0f; // used instead of each pattern's own saved Tempo/Swing whenever songInheritTempoSwing is off
 
 static const char *SONG_FOLDER_PATH="/CPS/Song";
-constexpr int NUM_SONG_SLOTS=8; // 1-8, no lettered banks needed — fewer songs than patterns expected
+constexpr int NUM_SONG_SLOTS=8; // 1-8, no lettered banks needed â€” fewer songs than patterns expected
 
 bool ensureSongFolder(){return SD.exists(SONG_FOLDER_PATH)||SD.mkdir(SONG_FOLDER_PATH);}
 
@@ -10265,13 +10284,13 @@ void updateSongIoPicker(){
 
 // ---- Song playback engine ----
 // Reuses SEQ's own step-timing engine (updateSeqTiming(), seqPlaying)
-// entirely — Song just loads each entry's pattern into seqSteps[] in
+// entirely â€” Song just loads each entry's pattern into seqSteps[] in
 // turn, applies that entry's Transpose as a multiplier songTransposeMult
 // (read by updateSeqTiming()), and advances entries via
 // songAdvanceOnPassComplete() (called from updateSeqTiming() whenever a
-// full 16-step pass completes). Deliberately simple for a first pass —
+// full 16-step pass completes). Deliberately simple for a first pass â€”
 // each entry transition does a synchronous SD card read via
-// loadPatternFromSlot(), no pre-fetch/double-buffering — flagged as a
+// loadPatternFromSlot(), no pre-fetch/double-buffering â€” flagged as a
 // possible source of a small timing hiccup right at entry boundaries;
 // worth listening for specifically there once this is on hardware.
 int   songPlayEntry=0;
@@ -10337,7 +10356,7 @@ void updateSongEditor(){
         if(s.shift&&(c=='l'||c=='L'))loadKey=true;
         if(c=='i'||c=='I')inheritKey=true;
         if(c=='o'||c=='O')loopKey=true;
-        // Sh+H:Latch, matching PLAY/SEQ exactly (v0.9996x) — SONG only
+        // Sh+H:Latch, matching PLAY/SEQ exactly (v0.9996x) â€” SONG only
         // had hold before, on request for parity across all three.
         // helpLatched/prevHelpLatchPressed are the same globals PLAY/SEQ
         // use, so a latch set in one screen carries over to this one too,
@@ -10378,16 +10397,16 @@ void updateSongEditor(){
 
     if(songFocus==SongFocus::SETTINGS){
         // Step 5->1, hold-to-repeat added (v0.9996x, corrected). Reusing
-        // menuIncHeldMs/menuDecHeldMs was WRONG — those track '/' and ','
+        // menuIncHeldMs/menuDecHeldMs was WRONG â€” those track '/' and ','
         // (updateMenuNavigation()'s mI/mDe), not ';'/'.' , which is what
         // left/right actually are here. updateMenuNavigation() runs
         // unconditionally every frame regardless of appMode and clears
-        // menuIncHeldMs whenever '/' isn't down — which while holding
+        // menuIncHeldMs whenever '/' isn't down â€” which while holding
         // '.' for right is always, so it zeroed the timer out from under
         // this on literally the next frame: the initial press fired
         // (menuKeyFire's own !prev branch), nothing after did. Correct
         // pairing is menuDownHeldMs (tracks '.', same key as right) and
-        // menuUpHeldMs (tracks ';', same key as left) — the reset logic
+        // menuUpHeldMs (tracks ';', same key as left) â€” the reset logic
         // stays in sync because it is now watching the actual key being
         // held, not an unrelated one.
         bool edgeInc=right&&!prevSongRightPressed, edgeDec=left&&!prevSongLeftPressed;
@@ -10499,13 +10518,13 @@ void updateTimbreScreen(){
 
     if(toggleKey&&!prevTimbreToggleKeyPressed){
         // Locked (v0.99943): this screen edits the live chain while it is
-        // actively sounding — the same audioTask race morphStart() has,
+        // actively sounding â€” the same audioTask race morphStart() has,
         // just triggered by hand instead of by picking a slot. See
         // morphChainMux's declaration.
         portENTER_CRITICAL(&morphChainMux);
         int slot=morphChainSlotOf(w);
         if(slot>=0){
-            // Remove — but never below the minimum, so there's always
+            // Remove â€” but never below the minimum, so there's always
             // something to morph between.
             if(morphChainLen>MIN_MORPH_SLOTS){
                 for(int i=slot;i<morphChainLen-1;i++)morphChain[i]=morphChain[i+1];
@@ -10799,7 +10818,7 @@ const char *imuYLabel(){return imuTargetName(imuAxisY.target);}
 // ---------------------------------------------------------
 // Display order for the picker, grouped by category. This is independent
 // from the ImuTarget enum's numeric order (which must stay stable for
-// backward-compatible save files) — it's purely a visual arrangement.
+// backward-compatible save files) â€” it's purely a visual arrangement.
 // group: non-null starts a new section and names it (v0.992). The list is
 // 29 rows deep with 7 on screen, so dividers alone left you scrolling with
 // no idea which part of the synth you were in; the name of the current
@@ -10810,7 +10829,7 @@ const ImuPickerRow IMU_PICKER_ORDER[]={
     // then the two that have no tab of their own. FX was near the top for
     // a while because its effects are the easiest to hear, but now that
     // the list is split into sections there is no longer a long scroll to
-    // save anyone from — so matching the tabs is worth more than
+    // save anyone from â€” so matching the tabs is worth more than
     // prioritising by impact, and there is one order to learn instead of
     // two.
     {ImuTarget::TIMBRE,        false, "VCO"},
@@ -10849,7 +10868,7 @@ const ImuPickerRow IMU_PICKER_ORDER[]={
 constexpr int IMU_PICKER_COUNT=sizeof(IMU_PICKER_ORDER)/sizeof(IMU_PICKER_ORDER[0]);
 
 // Section table, derived from the group labels above rather than written
-// out separately — one list to keep in step instead of two.
+// out separately â€” one list to keep in step instead of two.
 struct ImuPickerSection { const char *name; int first,count; };
 ImuPickerSection IMU_PICKER_SECTIONS[12];
 int IMU_PICKER_SECTION_COUNT=0;
@@ -10933,7 +10952,7 @@ void imuYOpenPicker(){openImuPicker(1);}
 // all of those were left holding whatever the LAST slot's patch said. The
 // next settings save then wrote that to settings.json, which is why Play
 // Style kept coming back as Pro/Hirajoshi and Drift as ON at 100% after
-// every reboot — values from a morph slot's patch, made permanent.
+// every reboot â€” values from a morph slot's patch, made permanent.
 struct GlobalStateBackup {
     ImuAxisConfig ax,ay;
     bool imuXE,imuYE,imuXH,imuYH,imuCal;
@@ -10972,7 +10991,7 @@ void restoreGlobals(const GlobalStateBackup &b){
     filterEnv=b.fenv; lfo=b.lfoCfg;
     playMode=b.pm; currentScaleIndex=b.scaleIdx;
     analogDriftOn=b.driftOn; analogDriftAmount=b.driftAmt;
-    // Bounds-checked (v0.9997x) — this was the only one of four
+    // Bounds-checked (v0.9997x) â€” this was the only one of four
     // arpRateIndex write sites without one; unlikely to be reachable in
     // practice since b.arpRate is captured from an already-valid live
     // value, but cheap to guard regardless.
@@ -10985,7 +11004,7 @@ void restoreGlobals(const GlobalStateBackup &b){
 }
 
 // Rebuild a slot's snapshot from its patch file. Runs at startup and when
-// an assignment changes — never while playing (v0.995).
+// an assignment changes â€” never while playing (v0.995).
 void morphLoadSlot(int i){
     if(!morphSlotsReady())return;
     morphSlots[i].used=false;
@@ -10994,7 +11013,7 @@ void morphLoadSlot(int i){
     if(!SD.exists(path.c_str())){morphSlotPatch[i]="";return;}
     // Snapshot the live sound, load the patch over the top, snapshot THAT,
     // then put the live sound back. Roundabout, but it reuses the existing
-    // loader instead of teaching the parser to write somewhere else — and
+    // loader instead of teaching the parser to write somewhere else â€” and
     // it only ever runs while stopped, so the brief detour is unheard.
     PatchSnapshot keep; morphCapture(keep);
     GlobalStateBackup gb; backupGlobals(gb);
@@ -11005,7 +11024,7 @@ void morphLoadSlot(int i){
     // Two values that identify a patch at a glance, logged so a snapshot
     // can be compared against the file it came from (v0.99881). If a slot
     // still reports the pre-edit numbers after a reboot, the fault is in
-    // reading the file rather than in when the snapshot was taken — and
+    // reading the file rather than in when the snapshot was taken â€” and
     // those two look identical from the outside.
 #if CPS_LOG_PATCH
     Serial.printf("[Morph] slot %d <- %s (cutoff %.0f, atk %.3f)\n",
@@ -11051,7 +11070,7 @@ void morphLoadAllSlots(){for(int i=0;i<NUM_MORPH_SLOTS;i++)morphLoadSlot(i);}
 
 void openMorphSlotScreen(){
     // The list of patches to choose from comes from patchNames[], which is
-    // only filled when the Load/Save browser is entered — so opening this
+    // only filled when the Load/Save browser is entered â€” so opening this
     // screen on a fresh boot offered nothing to assign (v0.9954). Scanned
     // here for the same reason the browser scans on entry. This is NOT the
     // boot-time scan removed in v0.9952: that one ran before any other
@@ -11289,7 +11308,7 @@ void updateImuCalibrateConfirm(){
 // each following the same list-of-SettingItem pattern used elsewhere.
 // SCREEN, not DISPLAY: M5Unified defines Display as a macro, so an
 // enumerator of that name is substituted before the compiler ever sees it
-// and the enum fails to parse — with the error reported on the line
+// and the enum fails to parse â€” with the error reported on the line
 // itself, which makes it look like a syntax mistake (v0.9938).
 enum class SettingsCategory : uint8_t { PATCH, IMU, BEND, PORTAMENTO, PLAYMODE, ARP, PATTERN, SCREEN, MIDI, MIDI_OUT, MIDI_IN, THEREMIN };
 SettingsCategory currentCategory = SettingsCategory::PATCH;
@@ -11298,7 +11317,7 @@ int selectedCategoryIndex = 0;
 // ---------------------------------------------------------
 // Reset-to-default (Phase 4)
 // ---------------------------------------------------------
-// Shared confirmation overlay for Patch(tone)/Bend/Portamento resets —
+// Shared confirmation overlay for Patch(tone)/Bend/Portamento resets â€”
 // same pattern as the Patch Bank delete-confirm and IMU Calibrate-confirm.
 enum class ResetKind : uint8_t { PATCH_TONE, BEND, PORTAMENTO, PATCH_RANDOM, PATTERN_RANDOM };
 bool resetConfirmOpen=false;
@@ -11327,7 +11346,7 @@ float randRange(float lo,float hi){
 
 // Resets everything tone-related (VCO/VCF/VCA/LFO/IMU + note hold) to a
 // simple, predictable starting point. Performance-time state (Bend,
-// Portamento, octave, transpose) is deliberately NOT touched here — those
+// Portamento, octave, transpose) is deliberately NOT touched here â€” those
 // get their own separate resets in their own category screens.
 // Capture the sound as it is right now into a snapshot (v0.995).
 void morphCapture(PatchSnapshot &d){
@@ -11353,7 +11372,7 @@ inline float mlerp(float a,float b,float t){return a+(b-a)*t;}
 
 // Write the morph at position t (0 = from, 1 = to) into the live sound.
 //
-// Discrete state is NOT interpolated — waveforms, the Morph chain, filter
+// Discrete state is NOT interpolated â€” waveforms, the Morph chain, filter
 // type, octave and semitone offsets. There is no halfway between a saw and
 // a square, and a chain that changed slot by slot mid-morph would sound
 // like a fault. They switch once, at the START, so the morph is heard as
@@ -11362,7 +11381,7 @@ inline float mlerp(float a,float b,float t){return a+(b-a)*t;}
 // than a step in the middle, and it lines up with the target patch's
 // character being what you are morphing toward.
 // Where timbreMorph's sweep begins, set once by morphStart() and read by
-// morphApply() every tick — a fixed reference point for the whole morph's
+// morphApply() every tick â€” a fixed reference point for the whole morph's
 // duration, since morphApply() only ever sees the current t (v0.99942).
 float morphTimbreStart=0.f;
 
@@ -11375,7 +11394,7 @@ void morphApply(float t){
     params.noiseLevel    =mlerp(A.noiseLevel,B.noiseLevel,t);
     // Interpolated from morphTimbreStart (an end of the CURRENT chain,
     // set once in morphStart()) toward B's own value, in lockstep with
-    // this whole function's t — not from the outgoing patch's value, and
+    // this whole function's t â€” not from the outgoing patch's value, and
     // not via the separate fast SM-based smoothing morphStart() leaves
     // alone for exactly this reason (v0.99942). See the note in
     // morphStart() for what this replaced and why.
@@ -11423,26 +11442,26 @@ void morphStart(int slot){
     // Redirecting to a new target before the previous morph finished
     // never reset morphDiagCount, so repeated redirects kept appending to
     // the SAME ring buffer across all of them until it hit MORPH_DIAG_CAP
-    // (48) and stopped recording anything further — a known gap noted
+    // (48) and stopped recording anything further â€” a known gap noted
     // when the diagnostic was built, now confirmed to actually matter: a
     // log showing exactly 48 samples, spanning several redirects, was the
     // first clue in a serious lockup report. Reset here so every morph
-    // attempt — including a redirect — starts its own clean window.
+    // attempt â€” including a redirect â€” starts its own clean window.
     morphDiagCount=0;
     morphCapture(morphFrom);
     morphTo=morphSlots[slot];
     // Compared BEFORE the overwrite below, since afterward there is
     // nothing left to compare against (v0.99945). Re-morphing to the same
-    // patch — or to a different patch that happens to share the same
-    // chain — was sweeping through the whole chain regardless, because
+    // patch â€” or to a different patch that happens to share the same
+    // chain â€” was sweeping through the whole chain regardless, because
     // the "start from a far end" logic ran unconditionally with no way
     // to tell the chain had not actually changed.
     bool sameChain=(morphChainLen==morphTo.chainLen);
     if(sameChain)for(int i=0;i<morphChainLen;i++)if(morphChain[i]!=morphTo.chain[i]){sameChain=false;break;}
 
-    // Discrete state switches now — see morphApply().
+    // Discrete state switches now â€” see morphApply().
     // Guarded below, inside refreshMorphTablePtrs() itself, and around
-    // the array/length writes here too (v0.99943) — see morphChainMux's
+    // the array/length writes here too (v0.99943) â€” see morphChainMux's
     // declaration.
     portENTER_CRITICAL(&morphChainMux);
     for(int i=0;i<MAX_MORPH_SLOTS;i++)morphChain[i]=morphTo.chain[i];
@@ -11451,20 +11470,20 @@ void morphStart(int slot){
     refreshMorphTablePtrs();
     // timbreMorph sweeps from an END of the NEW chain toward the target,
     // in lockstep with the whole morph's own timeline via morphApply()'s
-    // mlerp below — not the outgoing patch's value, and not the separate
+    // mlerp below â€” not the outgoing patch's value, and not the separate
     // fast timbreMorphTarget/SM smoothing used for live IMU tweaks
     // (v0.99942, revised from v0.9995's instant snap).
     //
     // The snap in v0.9995 killed the harsh mismatch but also killed the
     // gradual "sweep through waveforms" the morph is supposed to sound
-    // like. That sweep was never actually the problem —
+    // like. That sweep was never actually the problem â€”
     // getMorphedSample() already clamps its indices to morphChainLen
     // internally, so nothing was misreading memory; the old code just
     // started sweeping from a position that belonged to a chain which no
     // longer existed, an arbitrary jump with no relationship to the chain
     // that had just gone live. Starting from the far end of the SAME new
-    // chain instead — whichever end sits farther from this patch's own
-    // timbreMorph target — keeps every frame of the sweep inside one
+    // chain instead â€” whichever end sits farther from this patch's own
+    // timbreMorph target â€” keeps every frame of the sweep inside one
     // currently-active chain (consecutive waveforms of the same set, so
     // always coherent audio) and gives the longest, most audible sweep
     // rather than a token nudge.
@@ -11472,7 +11491,7 @@ void morphStart(int slot){
         int chainMax=max(0,morphChainLen-1);
         float target=constrain(morphTo.p.timbreMorph,0.f,(float)chainMax);
         if(sameChain){
-            // Nothing to sweep through — the chain did not change, so
+            // Nothing to sweep through â€” the chain did not change, so
             // starting from wherever the sound already is IS the correct
             // "morph," which for an unchanged chain is no audible change
             // at all. Re-morphing to the same patch, or to a different
@@ -11490,7 +11509,7 @@ void morphStart(int slot){
     params.osc2Semitones=morphTo.osc2Semi;
     params.subOscOctave=morphTo.subOct;
     filterParams.type=(FilterType)morphTo.filterType;
-    // LFO wave and target are discrete — there is no halfway between a
+    // LFO wave and target are discrete â€” there is no halfway between a
     // sine and a square, or between modulating pitch and modulating the
     // filter (v0.99874).
     lfo.wave=(LfoWave)morphTo.lfoWave;
@@ -11503,7 +11522,7 @@ void morphStart(int slot){
     // patch had that axis DISABLED, the offset it had been contributing
     // was frozen in place with nothing left to update it. With the axis on
     // Volume and the device tilted, that freezes the output at zero and
-    // nothing short of a reboot brings it back — the synth keeps
+    // nothing short of a reboot brings it back â€” the synth keeps
     // generating audio, the screen keeps animating, and it is silent.
     // Which is exactly the reported fault.
     //
@@ -11527,7 +11546,7 @@ void morphStart(int slot){
 // Advanced from loop(), which runs far faster than the ear needs and
 // leaves audioTask untouched.
 // Buffered rather than printed live (v0.99948, corrected from v0.99947).
-// The v0.99947 build stopped reproducing the click/silence entirely —
+// The v0.99947 build stopped reproducing the click/silence entirely â€”
 // not fixed, just avoided: a Serial.printf() call is slow enough that
 // adding one every 150ms shifted loop()'s timing just enough to dodge
 // whatever narrow window causes it, which is itself useful confirmation
@@ -11543,7 +11562,7 @@ struct MorphDiagEntry{
     float filterEnvLevel; float cutoffHz;
     // Added v0.99949: filterEnvPhase is a SEPARATE state machine from
     // envPhase (advanceEnvelope() runs two independent switch blocks),
-    // and the diagnostic had only ever logged the amp one — a brief
+    // and the diagnostic had only ever logged the amp one â€” a brief
     // filterEnvLevel excursion could have been the filter envelope
     // retriggering entirely on its own, invisible until now. noteHeld
     // distinguishes a genuine key-state change from something retriggering
@@ -11553,18 +11572,18 @@ struct MorphDiagEntry{
 // v0.99953's addition of reverbMix/chorusMix/chorusDepthMs/lfoDepth to
 // this struct is reverted here (v0.99954): SD mounting failed on every
 // boot immediately after that build, with no Cap attached, on both boot
-// paths, reproducibly — and the only thing that build actually changed
+// paths, reproducibly â€” and the only thing that build actually changed
 // was this struct growing. setup() (where SD mounts) runs entirely
 // before loop() is ever called, so morphTick()'s own code could not have
 // executed yet at the point SD fails; the connection has to be indirect
-// — a memory-layout shift from this array growing large enough to expose
+// â€” a memory-layout shift from this array growing large enough to expose
 // an out-of-bounds write elsewhere that happens to land on whatever the
 // VFS layer needs, not a direct causal link. The exact culprit elsewhere
 // is not yet found; reverting the only thing that changed is the safe,
 // testable move while it is.
-constexpr int MORPH_DIAG_CAP=48;   // 48*~150ms ≈ 7s, comfortably over morphTimeSec's usual range
+constexpr int MORPH_DIAG_CAP=48;   // 48*~150ms â‰ˆ 7s, comfortably over morphTimeSec's usual range
 MorphDiagEntry morphDiagLog[MORPH_DIAG_CAP];
-// morphDiagCount itself moved earlier in the file (v0.9997x fix) —
+// morphDiagCount itself moved earlier in the file (v0.9997x fix) â€”
 // morphStart() is defined before this point and now resets it too; see
 // the declaration next to loopHeartbeatMs for where it actually lives.
 
@@ -11607,12 +11626,12 @@ void performPatchToneReset(){
     // VCO
     params.timbreMorph=params.timbreMorphTarget=0.f;
     // Also restore the Morph chain itself (which waveforms are active,
-    // and in what order) back to the original default — otherwise a
+    // and in what order) back to the original default â€” otherwise a
     // customized chain, or an unusual waveform accidentally left
     // selected, would survive a "reset the tone" action. Resetting
     // timbreMorph to 0 alone isn't enough: it only resets the KNOB
     // POSITION within whatever chain happens to be active right now.
-    // Same four as the boot default — see the morphChain declaration.
+    // Same four as the boot default â€” see the morphChain declaration.
     // Locked for the same reason as morphStart() (v0.99943): Reset can be
     // invoked while a note is sounding.
     portENTER_CRITICAL(&morphChainMux);
@@ -11628,22 +11647,22 @@ void performPatchToneReset(){
     params.subOscOctave=-1;
     params.noiseLevel=0.f; params.noiseOffset=0.f; params.noiseOffsetTarget=0.f;
     // Bit-crusher (v0.9875): previously left untouched by a tone reset, so
-    // a forgotten Bit-crusher setting survived it — the same trap the Morph
+    // a forgotten Bit-crusher setting survived it â€” the same trap the Morph
     // chain used to be, and just as likely to be read as broken hardware.
     params.bitcrush=0.f; params.bitcrushOffset=params.bitcrushOffsetTarget=0.f;
     // v0.989: now that these are menu-owned and saved, a tone reset has to
-    // clear them too — otherwise a leftover Vibrato or Tremolo would
+    // clear them too â€” otherwise a leftover Vibrato or Tremolo would
     // survive "reset the tone" the same way the Morph chain used to.
     params.vibratoDepth=0.f;  params.vibratoDepthOffset=params.vibratoDepthOffsetTarget=0.f;
     params.vibratoRateHz=5.f; params.vibratoRateOffset =params.vibratoRateOffsetTarget =0.f;
     params.tremoloDepth=0.f;  params.tremoloDepthOffset=params.tremoloDepthOffsetTarget=0.f;
-    // Oscillator 2 back to silent (v0.9911) — a leftover second oscillator
+    // Oscillator 2 back to silent (v0.9911) â€” a leftover second oscillator
     // would survive "reset the tone" the way the Morph chain used to.
     params.osc2Level=0.f; params.osc2Waveform=OscWaveform::SAWTOOTH; params.osc2Shape=0.5f;
     params.osc2DetuneCents=0.f; params.osc2FineCents=0.f; params.osc2OctaveShift=0;
     params.osc2Semitones=0;   // v0.993
     // Both IMU axes back ON (v0.99873). Patch loads reset first and then
-    // parse, so a key the file does not contain means "default" — and
+    // parse, so a key the file does not contain means "default" â€” and
     // without this line these two had no default, they simply kept
     // whatever was live. Patches saved before v0.9921 have no imu_x_en at
     // all, so loading one inherited the previous patch's state; morphing
@@ -11658,7 +11677,7 @@ void performPatchToneReset(){
     // convention throughout, so zeroing the four mixes is enough to
     // disable them; the other FX parameters are left at whatever the user
     // had, since they're inaudible while off and re-enabling a pad already
-    // restores a sane default mix. Buffers are wiped too — otherwise the
+    // restores a sane default mix. Buffers are wiped too â€” otherwise the
     // previous patch's echoes would still be sitting in the delay line,
     // waiting to be read back out the next time Delay is switched on.
     params.ringModMix=0.f;
@@ -11685,14 +11704,14 @@ void performPatchToneReset(){
     params.resonanceOffset=0.f; params.resonanceOffsetTarget=0.f;
     filterEnv.depth=0.f; filterEnv.attackTime=0.1f; filterEnv.decayTime=0.3f;
     filterEnv.sustainLvl=0.0f; filterEnv.releaseTime=0.3f;
-    // VCA (ADSR) — simplest usable starting point: full sustain, quick release
+    // VCA (ADSR) â€” simplest usable starting point: full sustain, quick release
     adsr.attackTime=0.f; adsr.decayTime=0.f; adsr.sustainLevel=1.0f; adsr.releaseTime=0.2f;
     // LFO
     lfo.target=LfoTarget::NONE; lfo.wave=LfoWave::SINE; lfo.rateHz=2.0f; lfo.depth=0.f;
     lfoRateOffset=0.f; lfoRateOffsetTarget=0.f; lfoDepthOffset=0.f; lfoDepthOffsetTarget=0.f;
     // IMU
     // Must stay in sync with the imuAxisX/imuAxisY declarations near the
-    // top of the file (see the note there) — Y is Shape rather than Volume
+    // top of the file (see the note there) â€” Y is Shape rather than Volume
     // so that a default patch can never be silenced just by how the device
     // is being held.
     imuAxisX.target=ImuTarget::TIMBRE;
@@ -11712,7 +11731,7 @@ void performPatchToneReset(){
 
 // Randomizes every tone-related parameter (same scope as the tone reset,
 // including "type" parameters like filter type / LFO target+wave / IMU
-// targets, per user's request). Calibration is left alone — it's a
+// targets, per user's request). Calibration is left alone â€” it's a
 // physical setup thing, not a creative/tone parameter.
 void performPatchRandomize(){
     // VCO
@@ -11724,7 +11743,7 @@ void performPatchRandomize(){
     params.subOscOctave=(random(0,2)==0)?-1:-2;
     // Noise tends to mask pitch clarity noticeably even at fairly low
     // levels, so it's much rarer and much subtler here than the other
-    // randomized parameters — most random patches should have none at all.
+    // randomized parameters â€” most random patches should have none at all.
     params.noiseLevel=(random(0,100)<15)?randRange(0.05f,0.2f):0.f;
     params.noiseOffset=0.f; params.noiseOffsetTarget=0.f;
     // VCF
@@ -11789,7 +11808,7 @@ void performPatchRandomize(){
     params.osc2LevelOffset=params.osc2LevelOffsetTarget=0.f;   // v0.9934
     params.osc2ShapeOffset=params.osc2ShapeOffsetTarget=0.f;
     // Vibrato / Tremolo are modulation depths that make a patch seasick at
-    // full value, so they are occasional and shallow — the same reasoning
+    // full value, so they are occasional and shallow â€” the same reasoning
     // that keeps Noise rare above.
     params.vibratoDepth=(random(0,100)<30)?randRange(0.05f,0.35f):0.f;
     params.vibratoRateHz=randRange(2.f,8.f);
@@ -11831,8 +11850,8 @@ void performPatchRandomize(){
     // Portamento and Arp (on/off, type, Tempo/Swing/Rate) were briefly
     // added here (v0.99962) after being found missing from Randomize's
     // coverage, then explicitly withdrawn (v0.9996x): both are now
-    // performance/operational settings, not part of a patch at all — see
-    // the save/load gating above — so Randomize, which randomizes a
+    // performance/operational settings, not part of a patch at all â€” see
+    // the save/load gating above â€” so Randomize, which randomizes a
     // PATCH, correctly has nothing to do with either any more.
     params.volumeScale=1.0f; params.volumeScaleTarget=1.0f;
     // Note hold
@@ -11843,7 +11862,7 @@ void performPatchRandomize(){
 // Generates a random 16-step pattern using the CURRENT scale's notes (so
 // it's always in-key, EZ or Pro), with Tie/Accent/Slide included so the
 // result actually shows off the TB-303-style features, not just pitches.
-// Tempo/Swing are left untouched — those are pattern-level, not part of
+// Tempo/Swing are left untouched â€” those are pattern-level, not part of
 // what "randomize the steps" implies.
 void performPatternRandomize(){
     bool inNote=false;
@@ -11910,7 +11929,7 @@ SettingItem patchMenuItems[]={
     {"Morph", openMorphSlotScreen, openMorphSlotScreen, patchEnterLabel},
 };
 // 2-column layout (splitCol=5 in getCategoryItems): left = X's 5 items,
-// right = Y's 5 items + Calibrate as a 6th row. (ADV only — see
+// right = Y's 5 items + Calibrate as a 6th row. (ADV only â€” see
 // imuMenuItemsOriginal for the reduced original-Cardputer "PAD" version.)
 SettingItem imuMenuItemsAdv[]={
     {"IMU X",   imuXOpenPicker,    imuXOpenPicker,    imuXLabel},
@@ -11925,7 +11944,7 @@ SettingItem imuMenuItemsAdv[]={
     {"Y Dead",  imuYDeadzoneInc,   imuYDeadzoneDec,   imuYDzLabel},
     {"Calibrate",calibrateToggle,calibrateToggle,calibrateOnOffLabel},
 };
-// Original Cardputer: no Deadzone (nothing to filter out — it's a clean
+// Original Cardputer: no Deadzone (nothing to filter out â€” it's a clean
 // key-driven signal, not a noisy sensor) and no Calibrate (no physical
 // zero-point to correct on a virtual axis). 2-column, splitCol=4.
 SettingItem imuMenuItemsOriginal[]={
@@ -11945,7 +11964,7 @@ SettingItem imuMenuItemsOriginal[]={
 //
 // Sending 0 to release a controller is right for an effect depth, where 0
 // means "none". It is catastrophic for CC7 (Channel Volume) and CC11
-// (Expression), where 0 means SILENCE — and since nothing sends them again
+// (Expression), where 0 means SILENCE â€” and since nothing sends them again
 // afterwards, the receiver stays mute until it is power-cycled. Reported
 // exactly that way: moving off CC7 or CC11 killed the sound until reset.
 //
@@ -11956,7 +11975,7 @@ uint8_t midiCcReleaseValue(uint8_t cc){
         case 7:      // Channel Volume
         case 11:     // Expression
             return 127;
-        case 10:     // Pan — centre, not hard left
+        case 10:     // Pan â€” centre, not hard left
             return 64;
         default:
             return 0;
@@ -11986,7 +12005,7 @@ const char *midiCcOutLabel(){return midiCcOutEnabled?"ON":"off";}
 //
 // A CC is a value a receiver latches and holds, not a momentary command.
 // So retargeting X from Chorus to Reverb used to leave the chorus at
-// whatever depth it was last sent — the two effects stacked, and the only
+// whatever depth it was last sent â€” the two effects stacked, and the only
 // way back was to steer the CC to that number again and wind it down by
 // hand. Sending 0 on the way out is what the player means by "not that
 // one any more".
@@ -12033,7 +12052,7 @@ char midiCcYBuf[16];const char *midiCcYLabel(){
 void midiChInc(){midiCcOutChannel=(uint8_t)((midiCcOutChannel+1)&0x0F);}
 void midiChDec(){midiCcOutChannel=(uint8_t)((midiCcOutChannel+15)&0x0F);}
 char midiChBuf[8];const char *midiChLabel(){
-    // Stored 0-15, shown 1-16 — every piece of hardware labels them that
+    // Stored 0-15, shown 1-16 â€” every piece of hardware labels them that
     // way, and showing the internal number would be a needless trap.
     snprintf(midiChBuf,sizeof(midiChBuf),"%d",midiCcOutChannel+1);
     return midiChBuf;}
@@ -12076,18 +12095,18 @@ void thereminToggle(){
     // This prints exactly where the time goes on the next attempt instead
     // of trading one guess for another.
     unsigned long t0=millis();
-    // Fast targeted probe — see thereminFullScan below.
+    // Fast targeted probe â€” see thereminFullScan below.
     thereminFullScan=false;
     thereminEnabled=!thereminEnabled;
     // The Grove port has exactly two signal pins, and CPS_TOF_SDA_PIN/
     // SCL_PIN are the SAME physical pins as CPS_MIDI_RX_PIN/TX_PIN
-    // (v0.99910) — one Grove connector, and MIDI serial starts on those
+    // (v0.99910) â€” one Grove connector, and MIDI serial starts on those
     // pins unconditionally at boot regardless of what is actually plugged
     // in. Configuring I2C on top of a running UART on the same GPIOs is a
     // genuine electrical conflict, not a software race: corrupted bytes on
     // the MIDI side read as random Note On/Off and CC messages, which is
     // where the phantom notes, the runaway pitch, and parameters moving on
-    // their own all actually came from — including with no ToF unit
+    // their own all actually came from â€” including with no ToF unit
     // attached, since the UART alone was enough to misbehave once I2C
     // reconfigured the pins under it.
     //
@@ -12108,11 +12127,11 @@ void thereminToggle(){
 const char *thereminLabel(){
     // Says WHY when there is no sensor, rather than only that there is
     // none (v0.9992): "no i2c device" means nothing answered on the bus at
-    // all — wiring or power — while an address plus "init fail" means
+    // all â€” wiring or power â€” while an address plus "init fail" means
     // something is there but is not this sensor.
     if(!tofPresent){
         // Distinct from the boot-time reasons: this one means the sensor
-        // WAS working and then stopped (v0.99914) — a wiring, power, or
+        // WAS working and then stopped (v0.99914) â€” a wiring, power, or
         // interference issue during use rather than at startup.
         if(thereminLostConnection)return "lost connection";
         return tofScanResult;
@@ -12138,7 +12157,7 @@ char thereminOctBuf[8];const char *thereminOctLabel(){
     return thereminOctBuf;}
 
 // The top of the range, as its own setting (v0.9992). Steps a full octave
-// at a time — semitone precision at the TOP note is not the point, and a
+// at a time â€” semitone precision at the TOP note is not the point, and a
 // coarser step covers the -24..+36 range in fewer presses. The note name
 // is what actually matters when picking this, so the label shows that
 // rather than a raw semitone count.
@@ -12157,7 +12176,7 @@ char thereminFarBuf[10];const char *thereminFarLabel(){
     return thereminFarBuf;}
 // Live reading, so the range can be set by holding a hand where you want
 // the limit rather than by guessing millimetres. Read-only, but with a
-// real no-op handler rather than nullptr — every other row's handler is
+// real no-op handler rather than nullptr â€” every other row's handler is
 // called unconditionally, and a null one would crash on the first press.
 void thereminNoop(){}
 void thereminBusToggle(){
@@ -12169,7 +12188,7 @@ const char *thereminBusLabel(){return tofBusIndex==0?"Grove":"Cap G8/9";}
 char thereminScanBuf[16];const char *thereminScanLabel(){
     // On the Cap's shared bus, "found" legitimately includes the
     // keyboard controller, the IMU and whatever else already lives there
-    // — not a miscount (v0.99919). Grove's bus carries only the sensor,
+    // â€” not a miscount (v0.99919). Grove's bus carries only the sensor,
     // so it shows a plain count; Cap's is labelled "shared" so a higher
     // number there does not read as an error.
     if(tofBusIndex==1)
@@ -12211,7 +12230,7 @@ void midiClockToggle(){
 char midiClockBuf[14];const char *midiClockLabel(){
     if(!midiClockEnabled)return "off";
     // Show the received tempo once there is one, so it is obvious whether
-    // a master is actually sending — "ON" alone cannot distinguish a
+    // a master is actually sending â€” "ON" alone cannot distinguish a
     // working link from a silent cable.
     if(!midiClockLocked)return "ON (wait)";
     snprintf(midiClockBuf,sizeof(midiClockBuf),"%.0f BPM",midiClockBpm);
@@ -12238,12 +12257,12 @@ void midiCcIn1Inc(){midiCcInNum[1]=(uint8_t)((midiCcInNum[1]+1)&0x7F);}
 void midiCcIn1Dec(){midiCcInNum[1]=(uint8_t)((midiCcInNum[1]+127)&0x7F);}
 
 // Destination steps through IMU_PICKER_ORDER rather than the raw enum, so
-// the choices appear in the same order and grouping the IMU picker uses —
+// the choices appear in the same order and grouping the IMU picker uses â€”
 // and unassignable entries never come up. Clearing the offset on the way
 // out matters: leaving it behind would freeze the old parameter at
 // whatever the knob last sent, the same trap as the morph IMU handover.
 // Opens the shared picker rather than cycling through thirty targets one
-// key press at a time (v0.99882) — which is what the IMU page moved away
+// key press at a time (v0.99882) â€” which is what the IMU page moved away
 // from for the same reason.
 void midiCcIn0TgtOpen(){openImuPicker(IMU_PICKER_AXIS_CC0);}
 void midiCcIn1TgtOpen(){openImuPicker(IMU_PICKER_AXIS_CC1);}
@@ -12254,7 +12273,7 @@ const char *midiCcIn1TgtLabel(){return imuTargetName(midiCcInTarget[1]);}
 // and the next feature would not fit, but the reason to split is not just
 // room: sending and receiving are two different jobs and were only sharing
 // a page because they share a word. The channel setting stays with Out,
-// since that is the only direction it applies to — reception is Omni.
+// since that is the only direction it applies to â€” reception is Omni.
 void midiSw0Inc(){midiSwNum[0]=(uint8_t)((midiSwNum[0]+1)&0x7F);}
 void midiSw0Dec(){midiSwNum[0]=(uint8_t)((midiSwNum[0]+127)&0x7F);}
 void midiSw1Inc(){midiSwNum[1]=(uint8_t)((midiSwNum[1]+1)&0x7F);}
@@ -12270,7 +12289,7 @@ char midiSw1Buf[16];const char *midiSw1Label(){
     else snprintf(midiSw1Buf,sizeof(midiSw1Buf),"CC%d",midiSwNum[1]);
     return midiSw1Buf;}
 
-// Only five choices, so cycling is right here — a picker would be more
+// Only five choices, so cycling is right here â€” a picker would be more
 // ceremony than the list deserves.
 void midiSwFnStep(int slot,int d){
     int n=((int)midiSwFn[slot]+d+(int)MidiSwitchFn::FN_COUNT)%(int)MidiSwitchFn::FN_COUNT;
@@ -12345,7 +12364,7 @@ void playModeToggle(){playMode=(playMode==PlayMode::EZ)?PlayMode::PRO:PlayMode::
 const char *playModeLabel(){return playMode==PlayMode::EZ?"EZ Style":"Pro Style";}
 
 // ---------------------------------------------------------
-// Scale picker (Play Mode > Scale) — a genuine 2-level menu: pick a
+// Scale picker (Play Mode > Scale) â€” a genuine 2-level menu: pick a
 // category first, then a scale within it. Unlike the IMU target picker's
 // single flat list, this uses two full steps since the scale count is
 // large enough that even category-grouped flat scrolling would be a lot
@@ -12398,7 +12417,7 @@ void updateScalePicker(){
             scalePickerRowIndex=0;
             for(int i=0;i<n;i++)if(indices[i]==currentScaleIndex){scalePickerRowIndex=i;break;}
             // Actually apply the highlighted scale now (not just move the
-            // cursor) — otherwise confirming immediately without scrolling
+            // cursor) â€” otherwise confirming immediately without scrolling
             // first (the only option for a single-item category, e.g.
             // Chromatic) would close the picker without ever having
             // switched currentScaleIndex, silently keeping the old scale.
@@ -12425,7 +12444,7 @@ void updateScalePicker(){
         }
         prevScalePickerUpPressed=mU;prevScalePickerDownPressed=mD;
         if(confirm&&!prevScalePickerConfirmPressed){
-            scalePickerOpen=false; // keep currentScaleIndex — already live-previewed
+            scalePickerOpen=false; // keep currentScaleIndex â€” already live-previewed
         }
         prevScalePickerConfirmPressed=confirm;
         if(cancel&&!prevScalePickerTabPressed){
@@ -12477,9 +12496,9 @@ const char *arpTypeLabel(){
 }
 // Step 5->1 (v0.9996x): Tempo/Swing are timing controls, and 5-unit
 // steps were too coarse for fine adjustment. Fine-by-default now works
-// because the CATEGORY dispatch below gives these two items — and only
+// because the CATEGORY dispatch below gives these two items â€” and only
 // these, via the onIncrement!=onDecrement check that already existed for
-// a different reason — the same hold-to-repeat every VCF/VCA/LFO/FX
+// a different reason â€” the same hold-to-repeat every VCF/VCA/LFO/FX
 // value already has, so a single tap moves by 1 and holding covers the
 // same large jumps a bare 5-step tap used to.
 void arpTempoInc(){arpTempoBpm=min(arpTempoBpm+1.f,240.f);}
@@ -12508,11 +12527,11 @@ SettingItem patternMenuItems[]={
 };
 
 // UI theme picker (v0.9936). A plain cycling item rather than its own
-// screen — there are five entries and the effect is visible the instant it
+// screen â€” there are five entries and the effect is visible the instant it
 // changes, so a list to scroll would be more ceremony than it is worth.
 // Also forces a full redraw: uiColor is read all over the place and the
 // partial-redraw paths only repaint what they think is dirty, so without
-// this the new accent would arrive piecemeal — the same class of problem
+// this the new accent would arrive piecemeal â€” the same class of problem
 // as the v0.9922 help-overlay corruption.
 void uiThemeNext(){uiThemeIndex=(uiThemeIndex+1)%NUM_UI_THEMES;applyUiTheme();uiThemeDirty=true;}
 void uiThemePrev(){uiThemeIndex=(uiThemeIndex+NUM_UI_THEMES-1)%NUM_UI_THEMES;applyUiTheme();uiThemeDirty=true;}
@@ -12523,7 +12542,7 @@ const char *uiThemeLabel(){return UI_THEMES[constrain(uiThemeIndex,0,NUM_UI_THEM
 // (v0.9939).
 // Theme picker (v0.9937): its own list rather than a value that cycles in
 // place. Cycling meant you could only compare a theme against the one
-// before it, which is how Ice and Access came to look alike — seen side by
+// before it, which is how Ice and Access came to look alike â€” seen side by
 // side they are obviously different. The list also has room for swatches,
 // so the colours can be judged without applying them.
 void openThemePicker(){
@@ -12550,7 +12569,7 @@ SettingItem displayMenuItems[]={
 };
 
 // midiMenuItems is defined after categoryEnterLabel(), which is below
-// this function — declared rather than moved, since moving it would just
+// this function â€” declared rather than moved, since moving it would just
 // shift the problem to categoryEnterLabel().
 extern SettingItem midiMenuItems[2];
 
@@ -12639,7 +12658,7 @@ void openPatternCategory(){openCategory(SettingsCategory::PATTERN);}
 // Just the arrow (v0.9924). "Select>" was the same word on every row,
 // and because the row name prints in a fixed-width field it landed in a
 // different column for "Portamento" and "Play Style" than for shorter
-// names — a ragged edge for a word carrying no information. The arrow
+// names â€” a ragged edge for a word carrying no information. The arrow
 // alone still says "this opens something", and it lines up.
 const char *categoryEnterLabel(){return ">";}
 
@@ -12669,9 +12688,9 @@ SettingItem settingItemsAdv[]={
     {"Theremin",   openThereminCategory,openThereminCategory,categoryEnterLabel},
 };
 // Arp only makes sense from PLAY (it needs live chord-holding, which SEQ
-// mode suppresses while a pattern is playing) — hidden when SEQ is the
-// active home mode. Pattern is the inverse — only meaningful from SEQ
-// (it saves/loads Sequencer step patterns) — hidden when PLAY is home.
+// mode suppresses while a pattern is playing) â€” hidden when SEQ is the
+// active home mode. Pattern is the inverse â€” only meaningful from SEQ
+// (it saves/loads Sequencer step patterns) â€” hidden when PLAY is home.
 SettingItem settingItemsAdvNoArp[]={
     {"Patch",      openPatchCategory, openPatchCategory, categoryEnterLabel},
     {"Morph",      openTimbreScreen,  openTimbreScreen,  categoryEnterLabel},
@@ -12741,7 +12760,7 @@ void refreshSettingItems(){
 // ==========================================================
 void timbreInc(){params.timbreMorph=params.timbreMorphTarget=min(params.timbreMorph+0.1f,(float)max(1,morphChainLen-1));}
 void timbreDec(){params.timbreMorph=params.timbreMorphTarget=max(params.timbreMorph-0.1f,0.f);}
-// Short abbreviations for the VCO tab's tight value column — same
+// Short abbreviations for the VCO tab's tight value column â€” same
 // widths as before this feature, unlike the full OSC_WAVEFORM_NAMES
 // used on the dedicated Timbre settings screen where there's more room.
 const char *oscWaveformAbbrev(OscWaveform w){
@@ -12789,7 +12808,7 @@ void noiseDec(){params.noiseLevel=max(params.noiseLevel-0.05f,0.f);}
 char noiseBuf[10];const char *noiseLabel(){snprintf(noiseBuf,sizeof(noiseBuf),"%.0f%%",params.noiseLevel*100);return noiseBuf;}
 
 // Vibrato (v0.989). Pitch modulation, so it lives on the VCO tab rather
-// than in FX — an effects menu is the wrong home for a modulation source,
+// than in FX â€” an effects menu is the wrong home for a modulation source,
 // and the general LFO already offers the same routing via LfoTarget::PITCH.
 // Until now these could only be reached by tilting the device.
 void vibDepthInc(){params.vibratoDepth=min(params.vibratoDepth+0.05f,1.f);}
@@ -12911,7 +12930,7 @@ void ftPrev(){uint8_t v=(uint8_t)filterParams.type;filterParams.type=(FilterType
 char ftBuf[8];const char *ftLabel(){snprintf(ftBuf,sizeof(ftBuf),"%s",filterTypeName(filterParams.type));return ftBuf;}
 // Multiplicative rather than a fixed 100Hz (v0.990). Pitch is perceived
 // logarithmically, so a fixed step is an enormous jump down at 100Hz and
-// almost nothing up at 8000Hz — and crossing the range took 79 presses.
+// almost nothing up at 8000Hz â€” and crossing the range took 79 presses.
 // The same 1.15 factor the LFO Rate and Ring Mod Rate controls already
 // use: every press moves the same musical interval, low-end resolution
 // improves from 100Hz steps to 15Hz, and the full sweep is 31 presses.
@@ -12920,7 +12939,7 @@ void fcDec(){filterParams.cutoffHz=max(filterParams.cutoffHz/1.15f,FILTER_CUTOFF
 // The cutoff the synth is actually using, not just the knob position
 // (v0.99882). An external CC or a tilt writes filterCutoffOffset, and both
 // the readout and the response curve were drawn from the base value alone
-// — so turning a knob changed the sound with nothing on screen moving,
+// â€” so turning a knob changed the sound with nothing on screen moving,
 // which reads as the control not being connected.
 //
 // Mirrors the audio path's own scaling exactly (see imuScale in
@@ -13136,14 +13155,14 @@ const int NUM_BITCRUSH_ITEMS=sizeof(bitcrushItems)/sizeof(bitcrushItems[0]);
 // The FX tab now has two levels: a row of pads (one per effect, colored
 // by on/off) to pick and toggle effects at a glance, and each pad's own
 // parameter screen (reusing the same SettingItem-list pattern as VCO/
-// VCF/VCA/LFO) for detailed adjustment. Extensible by design — adding a
+// VCF/VCA/LFO) for detailed adjustment. Extensible by design â€” adding a
 // future effect (soft limiter, Chorus, Delay) just means one more
 // FxEffect enum value plus one more switch case in each of the 3
 // functions below; nothing about the pad UI itself needs to change.
 enum class FxEffect : uint8_t { RING_MOD, SOFT_LIMIT, CHORUS, DELAY, REVERB, BITCRUSH };
 constexpr int NUM_FX_EFFECTS = 6; // grows as effects are added
 // Pad names stay short on purpose: the selector lays these out at 44px
-// with a 4px gap, so five pads come to 4+5*44+4*4 = 240px — exactly the
+// with a 4px gap, so five pads come to 4+5*44+4*4 = 240px â€” exactly the
 // screen width. A sixth effect will need that layout revisited.
 const char *FX_EFFECT_NAMES[NUM_FX_EFFECTS] = {"RingMod","Limiter","Chorus","Delay","Reverb","Bitcrush"};
 
@@ -13162,8 +13181,8 @@ bool fxIsOn(int effectIdx){
 // "off"); toggling on restores a reasonable default rather than
 // whatever fractional value it might have been left at.
 // Per-effect memory of the last level the user had set (v0.9893).
-// Switching an effect off has to zero its Mix — that IS "off" throughout
-// this file, and fxIsOn() reads the same value to draw the pad — but until
+// Switching an effect off has to zero its Mix â€” that IS "off" throughout
+// this file, and fxIsOn() reads the same value to draw the pad â€” but until
 // now switching back on restored a fixed default instead of what had been
 // there. Setting Delay to 50%, toggling off and on, and getting 40% back
 // is just the pad quietly discarding your setting. These seed with the
@@ -13215,7 +13234,7 @@ FxViewMode fxViewMode=FxViewMode::PAD_SELECTOR;
 int  fxPadCursor=0;
 bool prevFxPadRowKeyPressed=false;   // v0.990: ';' row movement
 // Inline editing for single-parameter effects (v0.992). Opening a whole
-// screen to change one number was more ceremony than the number deserved —
+// screen to change one number was more ceremony than the number deserved â€”
 // the Bit-crusher's Amount is the only control it has. '.' on such a pad
 // edits in place instead of drilling in; ',' and '/' then change the value
 // rather than moving the pad cursor, and '.' again, Enter or Tab leaves.
@@ -13230,7 +13249,7 @@ bool prevFxPadLeftPressed=false, prevFxPadRightPressed=false;
 // Menu navigation
 // ==========================================================
 // Held-key auto-repeat (v0.990). Every menu action in this file was
-// edge-triggered — one press, one step — so changing a value meaningfully
+// edge-triggered â€” one press, one step â€” so changing a value meaningfully
 // meant pressing a key dozens of times. This is why editing felt slow far
 // more than any individual step size did.
 //
@@ -13246,14 +13265,14 @@ bool prevFxPadLeftPressed=false, prevFxPadRightPressed=false;
 constexpr unsigned long MENU_REPEAT_DELAY_MS = 400;
 constexpr unsigned long MENU_REPEAT_RATE_MS  = 70;
 // menuUpHeldMs/menuUpLastMs/menuDownHeldMs/menuDownLastMs moved earlier
-// too, alongside menuIncHeldMs (v0.9996x, second fix) — SEQ's and SONG's
+// too, alongside menuIncHeldMs (v0.9996x, second fix) â€” SEQ's and SONG's
 // Tempo/Swing were repaired to use these instead of menuIncHeldMs/
 // menuDecHeldMs (the actually-correct pairing for ';'/'.' ), but that
 // repair reused a pair that was, itself, still only locally visible from
-// here — the same forward-visibility problem as before, just on the
+// here â€” the same forward-visibility problem as before, just on the
 // other pair this time.
 // menuIncHeldMs/menuIncLastMs/menuDecHeldMs/menuDecLastMs moved earlier
-// in the file (v0.9996x fix) — updateSeqEditing() and updateSongEditor()
+// in the file (v0.9996x fix) â€” updateSeqEditing() and updateSongEditor()
 // are both defined before this point and now use them too, and a plain
 // global declaration has no forward visibility the way menuKeyFire()'s
 // own prototype does; they have to appear before every function that
@@ -13263,13 +13282,13 @@ unsigned long fxPadLeftHeldMs=0,fxPadLeftLastMs=0;
 unsigned long fxPadRightHeldMs=0,fxPadRightLastMs=0;
 unsigned long fxPadRowHeldMs=0;   // v0.9901: cleared alongside menuUpHeldMs
 
-// prev is read only — the existing trailing assignments still own it, so
+// prev is read only â€” the existing trailing assignments still own it, so
 // this drops into the established if(key&&!prevKey) pattern unchanged.
 bool menuKeyFire(bool now,bool prev,unsigned long &heldMs,unsigned long &lastMs){
     unsigned long t=millis();
     if(!now)return false;
     if(!prev){heldMs=t;lastMs=t;return true;}        // the press itself
-    // heldMs==0 means this hold was never started here — it belongs to
+    // heldMs==0 means this hold was never started here â€” it belongs to
     // whatever screen the key was actually pressed on (v0.9901). Without
     // this, pressing '.' on the FX pad selector to drill in would carry a
     // long-stale hold timestamp into the parameter screen, and the very
@@ -13301,7 +13320,7 @@ void updateMenuNavigation(){
 
     if(tab&&!prevTabPressed){
         // The [tab] diagnostic that used to sit here (v0.99956) is
-        // retired (v0.9997x, UI/UX diagnostic pass) — it did its job:
+        // retired (v0.9997x, UI/UX diagnostic pass) â€” it did its job:
         // found that the crash it was chasing traced to delay() calls
         // shared by every non-PLAY screen, fixed in v0.99957, confirmed
         // gone since. No ongoing reason for every Tab press to print.
@@ -13311,7 +13330,7 @@ void updateMenuNavigation(){
             // handled by updateImuPicker()/updateImuCalibrateConfirm()/updateResetConfirm()
         } else if(appMode==AppMode::FX&&fxViewMode==FxViewMode::PARAM_EDIT){
             // Return to the pad selector instead of proceeding to the next
-            // tab — FX is still part of the normal Tab-cycle otherwise
+            // tab â€” FX is still part of the normal Tab-cycle otherwise
             // (see the PAD_SELECTOR case, which falls through below).
             fxViewMode=FxViewMode::PAD_SELECTOR;
         fxInlineEdit=false;   // v0.992: never resume editing on re-entry
@@ -13364,20 +13383,20 @@ void updateMenuNavigation(){
         if(menuKeyFire(mD,prevMenuDownPressed,menuDownHeldMs,menuDownLastMs))selectedCategoryIndex=(selectedCategoryIndex+1)%count;
         // Edge-triggered by default, still. Several items here are binary
         // toggles bound to BOTH inc and dec (X Invert, X Curve, ...), and
-        // a repeating toggle flips ~14 times a second — you could not land
+        // a repeating toggle flips ~14 times a second â€” you could not land
         // on the state you wanted, it would just be wherever you released.
         // Others open pickers or confirm dialogs. Nothing about those
         // benefits, and the cost of getting a toggle wrong is real, so
         // they stay one-press-one-step.
-        // Genuine two-direction values (v0.9996x) — where onIncrement and
+        // Genuine two-direction values (v0.9996x) â€” where onIncrement and
         // onDecrement are actually different functions, which a toggle's
-        // shared single function never is — get the same hold-to-repeat
+        // shared single function never is â€” get the same hold-to-repeat
         // every VCF/VCA/LFO/FX value already has instead. ARP's Tempo and
         // Swing are the two rows this actually applies to today, requested
         // because their steps were dropped 5->1 for finer control, and a
         // tap-only 1-unit step would make a large change tedious; holding
         // now covers that instead. Reuses the same menuIncHeldMs/
-        // menuIncLastMs globals VCF/VCA/LFO/FX already share — only one
+        // menuIncLastMs globals VCF/VCA/LFO/FX already share â€” only one
         // screen is ever active, so nothing here conflicts with them.
         SettingItem &curItem=items[selectedCategoryIndex];
         bool itemRepeatable=(curItem.onIncrement!=curItem.onDecrement);
@@ -13390,7 +13409,7 @@ void updateMenuNavigation(){
         }
     }
     else if(appMode==AppMode::VCO){
-        // Both VCO pages run through one code path (v0.9911) — picking the
+        // Both VCO pages run through one code path (v0.9911) â€” picking the
         // table and cursor up front rather than duplicating the branch.
         SettingItem *vi=(vcoPage==0)?vcoItems:vco2Items;
         int vn=(vcoPage==0)?NUM_VCO_ITEMS:NUM_VCO2_ITEMS;
@@ -13398,7 +13417,7 @@ void updateMenuNavigation(){
         if(menuKeyFire(mU,prevMenuUpPressed,menuUpHeldMs,menuUpLastMs))  vsel=(vsel-1+vn)%vn;
         if(menuKeyFire(mD,prevMenuDownPressed,menuDownHeldMs,menuDownLastMs))vsel=(vsel+1)%vn;
         // The page flip is bound to inc AND dec on the "Osc" row, so it must
-        // not auto-repeat — a repeating toggle would flip pages ~14 times a
+        // not auto-repeat â€” a repeating toggle would flip pages ~14 times a
         // second and land wherever you released, the same reason the
         // CATEGORY screen's toggles are edge-triggered.
         bool pageRow=(vi[vsel].onIncrement==vi[vsel].onDecrement);
@@ -13446,8 +13465,8 @@ void updateMenuNavigation(){
         // Row movement (v0.990). The pads became a grid in v0.989 but ,//
         // kept walking all six in a line, so crossing from the top row to
         // the one below took three presses when the eye says it is one
-        // step down. ; moves a whole row, wrapping. It is only additive —
-        // ,// still walks the full sequence, and . still drills in — so
+        // step down. ; moves a whole row, wrapping. It is only additive â€”
+        // ,// still walks the full sequence, and . still drills in â€” so
         // nothing that already worked changed.
         //
         // Written as "up one row with wraparound" rather than "swap rows"
@@ -13468,7 +13487,7 @@ void updateMenuNavigation(){
         }
         prevFxPadRowKeyPressed=mU;
         // Enter leaves inline editing rather than toggling the effect off
-        // under you — you were adjusting it, so that is the likelier
+        // under you â€” you were adjusting it, so that is the likelier
         // intent. It still toggles normally when not editing.
         if(s.enter&&!prevFxToggleKeyPressed){
             if(fxInlineEdit)fxInlineEdit=false;
@@ -13571,7 +13590,7 @@ void drawWaveform(LovyanGFX &gfx,float morph,float shape){
 
 // Oscillator 2's preview (v0.9914). Same picture, but reading one chosen
 // waveform's Shape=0/Shape=1 pair directly instead of going through the
-// Morph chain — osc 2 selects a waveform outright, so there is nothing to
+// Morph chain â€” osc 2 selects a waveform outright, so there is nothing to
 // interpolate between chain slots.
 void drawOsc2Waveform(LovyanGFX &gfx,OscWaveform w,float shape){
     constexpr int GX=0,GY=12,GW=240,GH=43,CY=GY+GH/2,CYCLES=3;
@@ -13600,7 +13619,7 @@ void drawOsc2Waveform(LovyanGFX &gfx,OscWaveform w,float shape){
 // rowH is a parameter rather than a constant as of v0.9911: the VCO tab's
 // first page reached 11 items once oscillator 2 added a page-flip row and
 // a Mix row, and 6 rows at the old 13px pitch put the last one at y=122,
-// whose glyphs run to 130 — straight through the nav line at 126. Tighter
+// whose glyphs run to 130 â€” straight through the nav line at 126. Tighter
 // pitch is only needed there, so everything else keeps 13.
 void drawItemList(SettingItem *items,int count,int sel,int startY=76,int splitCol=-1,bool showNav=true,int rowH=13){
     const int ROW=rowH;
@@ -13609,7 +13628,7 @@ void drawItemList(SettingItem *items,int count,int sel,int startY=76,int splitCo
     canvas.setTextColor(uiColor,BLACK);
 
     if(twoCol){
-        // Vertical divider — sized to the taller of the two columns
+        // Vertical divider â€” sized to the taller of the two columns
         int rows=max(splitCol,count-splitCol);
         canvas.drawFastVLine(119,startY-2,rows*ROW+4,canvas.color565(0,64,0));
     }
@@ -13639,7 +13658,7 @@ void drawItemList(SettingItem *items,int count,int sel,int startY=76,int splitCo
     // Clear the nav row first (v0.9904). The per-screen clears above stop
     // at y=125 (fillRect(0,76,240,50) covers 76-125), so this row was only
     // ever overwritten, never erased. Nav strings differ per screen and are
-    // centred, so they start at different x and leave different gaps —
+    // centred, so they start at different x and leave different gaps â€”
     // cycling through the tabs left fragments of previous screens' text
     // showing through the spaces of the current one. Only a full redraw
     // (fillScreen) cleaned it up, which is why it built up over a lap of
@@ -13654,7 +13673,7 @@ void drawVcoScreen(bool full){
     canvas.startWrite();
     if(full)drawTabBar(canvas,AppMode::VCO);
     // Square's Shape IS pulse width, and calling it "Shape" cost real
-    // confusion once — a user comparing against the pre-Shape firmware had
+    // confusion once â€” a user comparing against the pre-Shape firmware had
     // no way to tell from the screen that the same control was in front of
     // them (v0.992). Named for what it does whenever the waveform in play
     // is Square, on either page. Row 2 is Shape on both item tables.
@@ -13741,7 +13760,7 @@ void drawVcfScreen(bool full){
     }
 
     // Cutoff marker (yellow vertical line). Drawn from the EFFECTIVE
-    // cutoff so it tracks the curve (v0.99883) — it marks where the filter
+    // cutoff so it tracks the curve (v0.99883) â€” it marks where the filter
     // IS, so leaving it at the knob position while the curve moved made it
     // look like the graph and the marker disagreed.
     int cx = GX + (int)((log(effectiveCutoffHz()/F_MIN)/log(F_MAX/F_MIN)) * GW);
@@ -13767,10 +13786,10 @@ void drawVcaScreen(bool full){
     drawAdsrGraph();
     canvas.fillRect(0,76,240,50,BLACK);
     // v0.989: Tremolo made this a 5th item, and a single column would have
-    // put it at y=128 — past the nav line at 126 and off the bottom. Split
+    // put it at y=128 â€” past the nav line at 126 and off the bottom. Split
     // into two columns instead (ADSR left, Release+Tremolo right), which
     // also matches how the VCO tab already lays its items out.
-    // Left 76,89,102 / right 76,89 — both clear the nav line.
+    // Left 76,89,102 / right 76,89 â€” both clear the nav line.
     drawItemList(vcaItems,NUM_VCA_ITEMS,selectedVcaIndex,76,3);
     canvas.endWrite();
     canvas.pushSprite(0,0);
@@ -13819,7 +13838,7 @@ void drawFxScreen(bool full){
         // cut the labels down to five characters. Two rows keep the names
         // readable at 72px and leave room for a 7th and 8th effect.
         // Filled/uiColor when on, outline-only when off, cursor gets a
-        // white border. ,// still walks all six in order — the grid is
+        // white border. ,// still walks all six in order â€” the grid is
         // purely visual, so no navigation change was needed.
         constexpr int PAD_COLS=3,PAD_W=72,PAD_H=26,PAD_GAP_X=6,PAD_GAP_Y=6;
         constexpr int PAD_X0=(240-(PAD_COLS*PAD_W+(PAD_COLS-1)*PAD_GAP_X))/2;
@@ -13878,7 +13897,7 @@ void drawSettingsScreen(bool full){
 
     // Single column: Patch / IMU / Bend / Portamento entry points.
     // Each opens its own dedicated category screen (AppMode::CATEGORY).
-    // Two columns (v0.994), the same treatment VCO and VCA already use —
+    // Two columns (v0.994), the same treatment VCO and VCA already use â€”
     // the list reached eight entries once Display was added, and a single
     // column that long walks the eye down the screen for no reason.
     //
@@ -13887,7 +13906,7 @@ void drawSettingsScreen(bool full){
     // entries that fill or exceed it. The right column starts at x=123 and
     // has to fit name plus value inside 117px, so the long names go in the
     // left column where there is room to overrun. That leaves Arp and
-    // Display on the right — both short.
+    // Display on the right â€” both short.
     drawItemList(settingItems,NUM_SETTING_ITEMS,selectedSettingIndex,24,6,false);
 
     const char *n1=";/. select  /:open category";
@@ -13923,7 +13942,7 @@ void drawCategoryScreen(bool full){
     // Warning under the Play Style list (v0.9941). "Drift ON" by itself
     // does not tell you the synth is about to detune itself, and this is
     // the kind of setting someone turns on, forgets, and later reports as
-    // a tuning bug. Only shown when it is actually on — a permanent
+    // a tuning bug. Only shown when it is actually on â€” a permanent
     // caution line would just become part of the furniture.
     if(currentCategory==SettingsCategory::PLAYMODE&&playMode==PlayMode::PRO&&analogDriftOn){
         const char *w1="Drift: pitch/filter/level";
@@ -13941,7 +13960,7 @@ void drawCategoryScreen(bool full){
 
 // Theme list with swatches (v0.9937). Each row shows the theme's three
 // mode accents as blocks beside its name, so the colours can be compared
-// against each other before committing to one — which is the whole reason
+// against each other before committing to one â€” which is the whole reason
 // this stopped being a cycling value.
 void drawMorphSlotScreen(bool full){
     canvas.startWrite();
@@ -14031,7 +14050,7 @@ void drawImuPickerScreen(bool full){
     canvas.startWrite();
     // Title names the section being browsed at level 1, and says so at
     // level 0 (v0.993). Redrawn whenever it changes, not only on a full
-    // redraw — the whole point is that it tracks the cursor.
+    // redraw â€” the whole point is that it tracks the cursor.
     const char *grp=(imuPickerLevel==0)?"Category"
         :(IMU_PICKER_SECTION_COUNT?IMU_PICKER_SECTIONS[imuPickerSection].name:"Target");
     static const char *lastGrp=nullptr;
@@ -14217,7 +14236,7 @@ void drawTimbreScreen(bool full){
     canvas.fillRect(0,12,240,123,BLACK);
 
     // ---- Active chain, drawn as boxes left-to-right (same spirit as
-    // Song's timeline) — the box holding the library cursor's waveform
+    // Song's timeline) â€” the box holding the library cursor's waveform
     // (if it's currently included) is outlined white.
     constexpr int CH_Y=16,CH_H=22,CH_W=36,CH_GAP=3;
     OscWaveform cursorW=(OscWaveform)timbreCursor;
@@ -14235,7 +14254,7 @@ void drawTimbreScreen(bool full){
     canvas.printf("%d/%d slots used (min %d, max %d)",morphChainLen,MAX_MORPH_SLOTS,MIN_MORPH_SLOTS,MAX_MORPH_SLOTS);
 
     // ---- Library list: every known waveform, showing its slot number
-    // if included, or a blank dash if not. No separate header label —
+    // if included, or a blank dash if not. No separate header label â€”
     // saves the vertical space needed to keep the last row clear of the
     // nav line below. Scrolls (centered on the cursor) now that the
     // library is bigger than safely fits in the available space at once.
@@ -14397,7 +14416,7 @@ void drawSongScreen(bool full){
 
         // ---- Mini step-grid preview (Option B): shows the actual step
         // shape of whichever entry is playing (or, when stopped, the
-        // entry the cursor is on) — filled = note, half-height = tie.
+        // entry the cursor is on) â€” filled = note, half-height = tie.
         int previewIdx=songPlaying?songPlayEntry:songCursorEntry;
         SongEntry &pe=songEntries[previewIdx];
         loadPatternPreview(pe.bank,pe.slot);
@@ -14414,7 +14433,7 @@ void drawSongScreen(bool full){
 
         // ---- Selected entry's own Transpose/Repeat, since the timeline
         // blocks are too small to show these numbers directly. Kept
-        // short (well under 240px/40 chars) — a longer version here
+        // short (well under 240px/40 chars) â€” a longer version here
         // previously overflowed the screen width and wrapped onto the
         // line below it.
         SongEntry &ce=songEntries[songCursorEntry];
@@ -14513,7 +14532,7 @@ void drawBendMeter(LovyanGFX &gfx,float bc,float mc,int yOff=0,int xOff=0){
     const int GY=MY+LBL_H, GH=MH_TOTAL-2*LBL_H, GCY=GY+GH/2; // the gauge itself, inset between the labels
     const int GCX=MX+MW/2; // gauge's horizontal center, used to center the UP/DWN labels on it
     // Clear the meter's full footprint incl. labels (DWN is the widest at
-    // 18px, centered on GCX) — starts at x=76, clearing the left info
+    // 18px, centered on GCX) â€” starts at x=76, clearing the left info
     // box's border at x=73 by 3px so the two boxes' borders stay intact.
     gfx.fillRect(76+xOff,MY,20,MH_TOTAL,BLACK);
     gfx.drawRect(MX,GY,MW,GH,uiColor);
@@ -14537,7 +14556,7 @@ void drawImuPad(LovyanGFX &gfx,int yOff=0,int xOff=0){
     // clear-rect is needed. A prior version cleared a rect starting at
     // PY-9 (i.e. reaching up to y=48), which intruded into the waveform
     // plot's row range (y=12-54) directly above this pad and periodically
-    // erased part of the waveform curve there — moving the label fully
+    // erased part of the waveform curve there â€” moving the label fully
     // inside the pad's box removes that overlap entirely.
     gfx.fillRect(PX,PY,PAD_SIZE,PAD_SIZE,BLACK);
     gfx.drawRect(PX,PY,PAD_SIZE,PAD_SIZE,uiColor);
@@ -14562,7 +14581,7 @@ void drawImuPad(LovyanGFX &gfx,int yOff=0,int xOff=0){
         dX=constrain(cx+(int)(padVirtualX*(PAD_SIZE/2-3)),PX+2,PX+PAD_SIZE-3);
         dY=constrain(cy+(int)(padVirtualY*(PAD_SIZE/2-3)),PY+2,PY+PAD_SIZE-3);
     }
-    // Hollow circle once Calibrate has been used, filled dot otherwise —
+    // Hollow circle once Calibrate has been used, filled dot otherwise â€”
     // an at-a-glance reminder that the zero point has been moved.
     if(imuCalibrated)gfx.drawCircle(dX,dY,3,uiColor);
     else             gfx.fillCircle(dX,dY,3,uiColor);
@@ -14606,11 +14625,11 @@ float getImuNorm(ImuTarget t){
     }
 }
 
-// "+" for a positive additive offset, nothing for zero or negative — the
+// "+" for a positive additive offset, nothing for zero or negative â€” the
 // numeric formatting below already supplies the "-" (v0.9993x). Every
 // target this touches is an OFFSET added on top of the patch's own base
 // setting, not an absolute value, and a bare positive number reads as
-// though it WERE the absolute value — the exact confusion reported for
+// though it WERE the absolute value â€” the exact confusion reported for
 // ARP Tempo ("+15bpm" is 15 over whatever tempo is set, not 15bpm).
 const char *imuSign(float v){return v>0.001f?"+":"";}
 
@@ -14675,7 +14694,7 @@ void drawHelpOverlay(LovyanGFX &gfx){
     // the 135px display.
     int helpBoxH=(appMode==AppMode::SEQ||appMode==AppMode::SONG)?99:109;
     // The MAXIMUM footprint (109, PLAY's own height) is cleared to black
-    // first, unconditionally, every draw — not just helpBoxH's own
+    // first, unconditionally, every draw â€” not just helpBoxH's own
     // smaller area (v0.9996x, fixing a real glitch the owner found:
     // switching from PLAY's taller box to SEQ/SONG's shorter one while H
     // was held left the old box's bottom strip un-erased, showing through
@@ -14698,7 +14717,7 @@ void drawHelpOverlay(LovyanGFX &gfx){
         gfx.setCursor(6,71); gfx.print("k/l :Volume    Z/X:Bend");
         gfx.setCursor(6,80); gfx.print("V:Mark  Sh+C:Copy Sh+X:Cut Ent:Paste");
         // Tap Tempo (Shift+Enter) works in SEQ too, matching PLAY, but
-        // had no mention here (v0.9996). G0:PLAY dropped to make room —
+        // had no mention here (v0.9996). G0:PLAY dropped to make room â€”
         // it is the same key that got here in the first place, the
         // natural inverse of Space/G0's toggle a player already knows.
         gfx.setCursor(6,89); gfx.print("Tab:Nx Sh+Tab:Pv  Sh+Ent:TapTempo");
@@ -14715,7 +14734,7 @@ void drawHelpOverlay(LovyanGFX &gfx){
         gfx.setCursor(6,71); gfx.print("Shift+S:Save  Shift+L:Load Song");
         gfx.setCursor(6,80); gfx.print("I:Inherit T/S  O:Loop-at-end");
         // Sh+H:Latch added (v0.9996x) to match the new latch support
-        // above; "to PLAY/SEQ" trimmed off "Tab:Back" for room — Tab's
+        // above; "to PLAY/SEQ" trimmed off "Tab:Back" for room â€” Tab's
         // own behaviour is already consistent across every other screen.
         gfx.setCursor(6,89); gfx.print("H:Help  Sh+H:Latch  Tab:Back");
         gfx.setCursor(6,98); gfx.print("release H to close");
@@ -14728,16 +14747,16 @@ void drawHelpOverlay(LovyanGFX &gfx){
     if(isCardputerAdv){
         // Re-laid-out v0.9996 to fit three features that had no mention
         // anywhere in HELP: Morph slot select (Shift+1..0), Tap Tempo
-        // (Shift+Enter, added v0.9994), and holding G0 for SONG mode —
+        // (Shift+Enter, added v0.9994), and holding G0 for SONG mode â€”
         // all real, working shortcuts a player would otherwise have no
         // way to discover except by reading the firmware itself. Trimmed
         // "H/S+H:Help hold/latch" down to just the latch half (Sh+H,
-        // folded into the Tab line below) — the hold half is redundant
+        // folded into the Tab line below) â€” the hold half is redundant
         // with self-evidently already being on this screen.
         gfx.setCursor(6,35); gfx.print(";/. :Octave    ,//:Transpose");
         gfx.setCursor(6,44); gfx.print("k/l :Volume    Z/X:Bend");
         // A/S is IMU axis HOLD (freeze the current value); Shift+A/Shift+S
-        // is the axis ENABLE toggle — two different actions the previous
+        // is the axis ENABLE toggle â€” two different actions the previous
         // single-line version conflated, corrected on request (v0.9996x).
         // The box grew by one row (see fillRect above) specifically to
         // fit both here rather than compress them into one line again.
@@ -14749,7 +14768,7 @@ void drawHelpOverlay(LovyanGFX &gfx){
         gfx.printf("Sh+A:XEn(%s) Sh+S:YEn(%s)",
             imuXEnabled?"on":"off", imuYEnabled?"on":"off");
         // ARP before Latch (v0.9996x): Latch presupposes ARP is already
-        // running, so listing it first read backwards — the owner's
+        // running, so listing it first read backwards â€” the owner's
         // observation, once pointed out.
         gfx.setCursor(6,71); gfx.print("D:NoteHold  Sh+V:Arp  V:Latch");
         gfx.setCursor(6,80); gfx.print("Sh+1-0:Morph  Sh+Ent:TapTempo");
@@ -14763,15 +14782,15 @@ void drawHelpOverlay(LovyanGFX &gfx){
         gfx.setCursor(6,80); gfx.print("Space:Seq  G0:SEQ Hold-G0:Song");
     }
     // Fixed position for both branches (v0.9996x): the ADV branch above
-    // now uses one more row than the non-ADV one, so these — shared by
-    // both — sit low enough to clear ADV's last line (89+8=97). Non-ADV
+    // now uses one more row than the non-ADV one, so these â€” shared by
+    // both â€” sit low enough to clear ADV's last line (89+8=97). Non-ADV
     // just gets a slightly bigger gap above them; nothing overlaps.
     gfx.setCursor(6,98); gfx.print("Tab:Next Sh+Tab:Prev  Sh+H:Latch");
     gfx.setCursor(6,108); gfx.print("release H to close");
 }
 
 void drawPlayScreen(bool full){
-    // HELP overlay: keep using the original full-size canvas — this is a
+    // HELP overlay: keep using the original full-size canvas â€” this is a
     // rare, toggle-triggered case, not worth splitting.
     if(helpVisible){
         canvas.startWrite();
@@ -14787,7 +14806,7 @@ void drawPlayScreen(bool full){
     bool forceFullBoth=full; // caller already folds in "help just closed" via modeChanged||forceFullRedraw
 
     // ---- TOP (y=0-54): tab bar + waveform. Only pushed when the tab bar
-    // needs a full redraw or the waveform shape actually changed — most
+    // needs a full redraw or the waveform shape actually changed â€” most
     // of the time nothing is modulating Timbre/PWM, so this skips a
     // meaningful chunk (26KB) of the old single 63KB transfer entirely.
     // The display value is smoothed so that modulation (IMU tilt, an LFO
@@ -14809,7 +14828,7 @@ void drawPlayScreen(bool full){
     // press a key to find out whether it was on (v0.9921). It shows in the
     // corner of the waveform area now. Included in the dirty test so a
     // change redraws immediately rather than waiting for the waveform to
-    // move — with a static patch that could otherwise be a long wait.
+    // move â€” with a static patch that could otherwise be a long wait.
     static bool lastDrawnArp=false,lastDrawnLatch=false;
     bool topDirty=forceFullBoth||fabsf(dispTimbreMorph-lastDrawnMorph)>0.004f||fabsf(dispOscShape-lastDrawnShape)>0.002f
                   ||arpEnabled!=lastDrawnArp||arpLatchEnabled!=lastDrawnLatch;
@@ -14839,7 +14858,7 @@ void drawPlayScreen(bool full){
     }
 
     // ---- NAME (x=0-73, y=55-112): note info, O/T, P/H. Always pushed
-    // when this function runs — this is literally what changes on every
+    // when this function runs â€” this is literally what changes on every
     // note keypress, so there's no meaningful dirty-check to skip it with.
     canvasName.startWrite();
     if(forceFullBoth){
@@ -14862,7 +14881,7 @@ void drawPlayScreen(bool full){
             if(x+w>70){x=4;y+=9;}
             // Capped at two rows rather than three (v0.99936), to
             // guarantee a free row below the note list for Swing to live
-            // on its own line — a large chord or a heavily latched ARP
+            // on its own line â€” a large chord or a heavily latched ARP
             // could otherwise grow into a third row and collide with it,
             // the same way the fixed Octave/Transpose line already did
             // once. Two rows covers ordinary playing comfortably; a very
@@ -14882,7 +14901,7 @@ void drawPlayScreen(bool full){
         canvasName.setTextColor(uiColor,BLACK);
         // Tempo and rate on the line the frequency uses when the arp is
         // off (v0.99891). With the arp running that line is unused, and
-        // tempo is the thing you most want to see while it is — the note
+        // tempo is the thing you most want to see while it is â€” the note
         // list above already says WHAT is playing, so the useful missing
         // information is how fast. Also shows an external clock's tempo
         // when one is driving, which is the only place that value is
@@ -14890,7 +14909,7 @@ void drawPlayScreen(bool full){
         bool ext=(midiClockEnabled&&midiClockLocked);
         float shownBpm=constrain((ext?midiClockBpm:arpTempoBpm)+arpTempoOffset,40.f,240.f);
         // y=23/32 (v0.99938, corrected from 78/84): every other row in
-        // this box — the note list, O:+0/T:+0, P:off/H:off — is spaced
+        // this box â€” the note list, O:+0/T:+0, P:off/H:off â€” is spaced
         // 9px apart, and these two were only 6px apart, close enough for
         // descenders to visibly touch on the real screen even though nothing
         // was technically out of bounds. The note list is capped to two
@@ -14899,20 +14918,20 @@ void drawPlayScreen(bool full){
         // line at y=40 with no gap wasted.
         // This box's convention is "absolute pixel row minus
         // BOTTOM_Y_OFFSET" everywhere else (e.g. O:+0 at 95, P:off at
-        // 104) — kept the same here rather than writing a raw local
+        // 104) â€” kept the same here rather than writing a raw local
         // number, so this line's position stays correct if
         // BOTTOM_Y_OFFSET is ever changed. 78 -> local 23, immediately
         // after the note list's two guaranteed rows.
         canvasName.setCursor(4,78-BOTTOM_Y_OFFSET);
         // The '~' external-clock marker only prints when it applies now,
-        // rather than always reserving its column as a literal space —
+        // rather than always reserving its column as a literal space â€”
         // that space was pushing this line one character right of every
         // other row in the box, which is what looked like poor left
         // alignment in the photo.
         if(ext)canvasName.print('~');
         canvasName.printf("%.0f %-4s",shownBpm,ARP_RATES[arpRateIndex].label);
         float shownSwing=constrain(arpSwing+arpSwingOffset,-100.f,100.f);
-        // 87 -> local 32, exactly 9px below Tempo/Rate — the same spacing
+        // 87 -> local 32, exactly 9px below Tempo/Rate â€” the same spacing
         // as every other row in this box, landing flush against O:+0 at
         // local 40 (95-BOTTOM_Y_OFFSET) with no gap wasted.
         canvasName.setCursor(4,87-BOTTOM_Y_OFFSET);
@@ -14937,7 +14956,7 @@ void drawPlayScreen(bool full){
     canvasName.pushSprite(0,BOTTOM_Y_OFFSET);
 
     // ---- IMU (x=73-240, y=55-112): bend meter, IMU pad+readout, volume.
-    // Only pushed when something in it actually changed — this is the
+    // Only pushed when something in it actually changed â€” this is the
     // main win: playing notes with IMU=None (and Bend/Volume untouched)
     // skips this ~27KB region entirely.
     static float lastPushedBend=-9999.f, lastPushedVol=-9999.f;
@@ -14949,7 +14968,7 @@ void drawPlayScreen(bool full){
     float curImuY=(imuAxisY.target!=ImuTarget::NONE)?getImuNorm(imuAxisY.target):0.f;
     // The pad DOT's position tracks raw tilt (or the virtual PAD axes on
     // original Cardputer) directly, independent of whether any IMU target
-    // is even assigned — curImuX/Y above don't capture this at all (they
+    // is even assigned â€” curImuX/Y above don't capture this at all (they
     // stay 0 with target=None), so without also checking the raw input,
     // the dot only ever moved when something ELSE (bend/volume/a target
     // value) also happened to change, freezing otherwise.
@@ -14984,8 +15003,8 @@ void drawPlayScreen(bool full){
         }
         // An axis that is off shows an empty track (v0.9934). getImuNorm()
         // returns each target's CURRENT value, and where zero sits differs
-        // per target — Shape's neutral is the middle of its range, the
-        // Bit-crusher's is the bottom — so a disabled axis was drawing a
+        // per target â€” Shape's neutral is the middle of its range, the
+        // Bit-crusher's is the bottom â€” so a disabled axis was drawing a
         // half-full bar for one target and an empty one for another. That
         // was never a decision, just what the maths happened to give.
         if(imuXEnabled&&imuAxisX.target!=ImuTarget::NONE){
@@ -15015,7 +15034,7 @@ void drawPlayScreen(bool full){
     }
 
     // ---- NAV (x=0-240, y=113-134): full-width nav divider, scale name,
-    // nav text. Only redrawn/pushed on forceFullBoth — this rarely changes.
+    // nav text. Only redrawn/pushed on forceFullBoth â€” this rarely changes.
     if(forceFullBoth){
         canvasNav.startWrite();
         canvasNav.fillScreen(BLACK);
@@ -15104,17 +15123,17 @@ void drawSeqScreen(bool full){
     const uint16_t seqBeatColors[4]={
         // Primary red / orange / green / blue, from a palette the user
         // picked (v0.9928). Four clearly separated hues rather than the
-        // 808's warm gradient, which suits a small backlit panel better —
+        // 808's warm gradient, which suits a small backlit panel better â€”
         // the yellow that sat here before was too close to the near-white
         // fill to read across it.
-        canvas.color565(233,  7,  7),   // beat 1 — red
-        canvas.color565(255,125,  0),   // beat 2 — orange
-        canvas.color565( 49,212, 28),   // beat 3 — green
+        canvas.color565(233,  7,  7),   // beat 1 â€” red
+        canvas.color565(255,125,  0),   // beat 2 â€” orange
+        canvas.color565( 49,212, 28),   // beat 3 â€” green
         // Lightened from the source palette's 1005EB. That blue is very
         // dark, and a dark outline on a black background is close to
-        // invisible on this display — the hue is kept, the luminance is
+        // invisible on this display â€” the hue is kept, the luminance is
         // raised until it actually reads.
-        canvas.color565( 60, 80,255),   // beat 4 — blue
+        canvas.color565( 60, 80,255),   // beat 4 â€” blue
     };
     for(int i=0;i<SEQ_NUM_STEPS;i++){
         int x=i*STEP_W;
@@ -15129,7 +15148,7 @@ void drawSeqScreen(bool full){
         // near-white: the fill is inset by `thick`, so there is always a
         // black gap between the two and the outline still reads (v0.9927).
         // TR-808 bar colouring (v0.9924). The 808 tinted its sixteen step
-        // buttons in groups of four — red, orange, yellow, cream — so you
+        // buttons in groups of four â€” red, orange, yellow, cream â€” so you
         // could see at a glance which beat of the bar you were on. The 909
         // dropped it, but it is genuinely useful and costs nothing here.
         // Applied to the step OUTLINE only: the fill still shows velocity
@@ -15137,13 +15156,13 @@ void drawSeqScreen(bool full){
         // nothing that already carried meaning is displaced.
         //
         // Note these are 4 groups of 4 sixteenth notes, which is one beat
-        // each rather than one bar — matching the 808's own layout, where
+        // each rather than one bar â€” matching the 808's own layout, where
         // the sixteen buttons are a single bar.
         uint16_t beatColor=seqBeatColors[(i/4)&3];
         uint16_t lineColor=isCursor?WHITE:beatColor;
         // Dimmed fill (v0.9925). The velocity bar used the same bright
         // orange as the beat outlines, so once steps had notes in them the
-        // outlines vanished into the fill — the colours were simply too
+        // outlines vanished into the fill â€” the colours were simply too
         // close in both hue and brightness. Nothing is lost by darkening
         // the fill: bar HEIGHT carries velocity and the accent bar stays a
         // different hue, so both still read, and the beat colours now sit
@@ -15189,7 +15208,7 @@ void drawSeqScreen(bool full){
     canvas.drawFastHLine(0,55,240,uiColor);
 
     // Left block (matches PLAY's note-info box position/size): everything
-    // is always visible — step/note, Velocity+flags, Tempo+Swing,
+    // is always visible â€” step/note, Velocity+flags, Tempo+Swing,
     // Octave+Transpose, Portamento+Hold (matching PLAY's own "O:/T:" and
     // "P:/H:" lines exactly, since both are active in SEQ too), and a
     // single "Ed:" indicator showing which value ,/. currently adjusts,
@@ -15214,7 +15233,7 @@ void drawSeqScreen(bool full){
         :(seqPatternTarget==SeqPatternTarget::TEMPO?"Bpm":"Swg");
     canvas.printf("Ed:%-3s %s",editLabel,seqPlaying?"PLAY":"STOP");
 
-    // Right block: IMU pad, reused directly from PLAY — same targets,
+    // Right block: IMU pad, reused directly from PLAY â€” same targets,
     // same physical tilt/PAD input, works identically here.
     drawImuPad(canvas);
     drawBendMeter(canvas,params.pitchBendCents+keyBendCurrent,keyBendMaxCents);
@@ -15279,7 +15298,13 @@ void setup(){
     Serial.begin(921600);
     randomSeed(esp_random());
     auto cfg=M5.config();
+    Serial.begin(115200);
     M5Cardputer.begin(cfg,true);
+    if (M5.isCardenza()) {
+        Serial.printf("[Cardenza] runtime ES8156 %s; heap=%u\n", M5.cardenzaCodecReady()?"ready":"FAILED", ESP.getFreeHeap());
+        cardenza_m5_require(M5.cardenzaCodecReady(), "ES8156 INIT FAILED");
+    }
+
     isCardputerAdv = (M5.getBoard() == m5::board_t::board_M5CardputerADV);
     refreshSettingItems();
     Serial.printf("[Board] %s\n", isCardputerAdv?"CardputerADV":"Cardputer (original)");
@@ -15295,13 +15320,13 @@ void setup(){
     // allocation worth the name, and nothing happens if no unit is plugged
     // in (v0.998).
     midiSerialBegin();
-    seqAccentNoteColor = M5Cardputer.Display.color565(220,30,30); // red — accented steps' velocity bar
+    seqAccentNoteColor = M5Cardputer.Display.color565(220,30,30); // red â€” accented steps' velocity bar
     // Darkened versions used only for the step velocity bars (v0.9925), so
     // the TR-808 beat outlines stay legible over a filled step. Text,
-    // borders and every other use of the accent colour are untouched —
+    // borders and every other use of the accent colour are untouched â€”
     // dimming the whole SEQ theme would have made the readouts harder to
     // read to fix a problem that only exists inside the step boxes.
-    // Darkening the orange straight down took it through brown — 120,66,0
+    // Darkening the orange straight down took it through brown â€” 120,66,0
     // is literally a dark brown, and on the panel it read as muddy rather
     // than dim (v0.9926). Pulling the hue toward amber/gold and keeping
     // saturation high instead gives the same drop in brightness against
@@ -15310,8 +15335,8 @@ void setup(){
     // red went red-brown, and pink stays clearly a different hue from the
     // red beat-1 outline above it.
     // The bar is near-white now (v0.9927). Every attempt at a dimmed
-    // ORANGE fill stayed in the same hue family as the beat outlines —
-    // beat 1 and beat 2 in particular — so the border kept sinking into
+    // ORANGE fill stayed in the same hue family as the beat outlines â€”
+    // beat 1 and beat 2 in particular â€” so the border kept sinking into
     // it. A neutral has no hue to collide with, so it separates from all
     // four beat colours equally, and it is the brightest thing available,
     // which suits the element that should read first.
@@ -15327,7 +15352,7 @@ void setup(){
     //
     // The cost is real and worth stating, since this may want reverting.
     // White was doing the work of marking the playhead, and brightness is
-    // the strongest signal there is — a white bar moving through grey ones
+    // the strongest signal there is â€” a white bar moving through grey ones
     // is unmissable. With the fill white, the playhead has to be marked by
     // HUE instead, which is weaker, and weakest of all on a low-velocity
     // step where the bar is only a few pixels tall. Purple is the pick
@@ -15341,7 +15366,7 @@ void setup(){
     // Teal, replacing the magenta (v0.9929). The choice is more
     // constrained than it looks: the four beat outlines occupy roughly
     // 0 deg (red), 30 (orange), 110 (green) and 235 (blue), which leaves
-    // exactly two gaps wide enough to be unambiguous — around 175 (cyan /
+    // exactly two gaps wide enough to be unambiguous â€” around 175 (cyan /
     // teal) and around 300 (purple / magenta). Teal is the better of the
     // two: it sits ~60 deg from both of its neighbours, where purple is
     // only ~50 from blue and would be the fill sitting INSIDE a blue
@@ -15364,44 +15389,44 @@ void setup(){
     M5Cardputer.Display.setTextSize(1);
     drawSplashBootText();
 
-    canvas.setColorDepth(16);
+    canvas.setColorDepth(CPS_MENU_COLOR_DEPTH);
     // PSRAM: tried internal SRAM as an experiment (v0.9363) to rule out
     // PSRAM-bus contention as the cause of an audible crackle, but it
-    // made no difference — the crackle correlated with redraw FREQUENCY
+    // made no difference â€” the crackle correlated with redraw FREQUENCY
     // during rapid key input, not where the canvas lives (see the
     // MIN_REDRAW_MS throttle below, added to address the real cause).
     // Back to PSRAM so internal SRAM isn't needlessly spent on this.
-    canvas.setPsram(true);
+    canvas.setPsram(CPS_USE_PSRAM);
     if(!canvas.createSprite(240,135)){
-        Serial.println("[Canvas] createSprite FAILED — PLAY/SEQ will show a blank screen until this is fixed");
+        Serial.println("[Canvas] createSprite FAILED â€” PLAY/SEQ will show a blank screen until this is fixed");
     }
     canvas.setTextSize(1);
 
     canvasTop.setColorDepth(16);
-    canvasTop.setPsram(true);
+    canvasTop.setPsram(CPS_USE_PSRAM);
     if(!canvasTop.createSprite(240,55)){
-        Serial.println("[CanvasTop] createSprite FAILED — PLAY's top region will be blank until this is fixed");
+        Serial.println("[CanvasTop] createSprite FAILED â€” PLAY's top region will be blank until this is fixed");
     }
     canvasTop.setTextSize(1);
 
     canvasName.setColorDepth(16);
-    canvasName.setPsram(true);
+    canvasName.setPsram(CPS_USE_PSRAM);
     if(!canvasName.createSprite(74,58)){ // x=0-73, y=55-112
-        Serial.println("[CanvasName] createSprite FAILED — PLAY's note-name region will be blank until this is fixed");
+        Serial.println("[CanvasName] createSprite FAILED â€” PLAY's note-name region will be blank until this is fixed");
     }
     canvasName.setTextSize(1);
 
     canvasImu.setColorDepth(16);
-    canvasImu.setPsram(true);
+    canvasImu.setPsram(CPS_USE_PSRAM);
     if(!canvasImu.createSprite(167,58)){ // x=73-240, y=55-112
-        Serial.println("[CanvasImu] createSprite FAILED — PLAY's IMU/bend region will be blank until this is fixed");
+        Serial.println("[CanvasImu] createSprite FAILED â€” PLAY's IMU/bend region will be blank until this is fixed");
     }
     canvasImu.setTextSize(1);
 
     canvasNav.setColorDepth(16);
-    canvasNav.setPsram(true);
+    canvasNav.setPsram(CPS_USE_PSRAM);
     if(!canvasNav.createSprite(240,22)){ // x=0-240, y=113-134
-        Serial.println("[CanvasNav] createSprite FAILED — PLAY's nav/scale text will be blank until this is fixed");
+        Serial.println("[CanvasNav] createSprite FAILED â€” PLAY's nav/scale text will be blank until this is fixed");
     }
     canvasNav.setTextSize(1);
 
@@ -15413,18 +15438,18 @@ void setup(){
 
     // Allocate before the card mount, and report the heap either side of
     // it. Internal DRAM is what SD.begin() draws on, and a mount failure
-    // here presents as every setting being back at its default — worth
+    // here presents as every setting being back at its default â€” worth
     // being able to see the number rather than inferring it (v0.9953).
     allocMorphSlots();
     // No PSRAM figure: this hardware has none and never did (see
     // platformio.ini). What matters is internal DRAM, and how much of it
-    // mounting the card costs — measured at ~27KB, from ~59KB down to
+    // mounting the card costs â€” measured at ~27KB, from ~59KB down to
     // ~31KB, which is the real ceiling on anything wanting a big buffer.
     Serial.printf("[Mem] free heap %u, largest block %u\n",
         (unsigned)ESP.getFreeHeap(),(unsigned)ESP.getMaxAllocHeap());
     bool sdOk=initSDCard();
     Serial.printf("[Mem] after SD.begin: free heap %u\n",(unsigned)ESP.getFreeHeap());
-    // Moved here (v0.99981) — right after the mount itself, before the
+    // Moved here (v0.99981) â€” right after the mount itself, before the
     // heavier ensureCpsFolder()/loadSettings()/morphLoadAllSlots() block
     // below. The previous position (after all of that) still failed to
     // allocate on real hardware; this board has no PSRAM at all (see the
@@ -15441,14 +15466,14 @@ void setup(){
         // Slot snapshots are built once, at boot, so that pressing a slot
         // mid-performance never touches the card (v0.995).
         //
-        // morphLoadAllSlots() does NOT need scanPatches() first — it reads
+        // morphLoadAllSlots() does NOT need scanPatches() first â€” it reads
         // morphSlotPatch[i] (a stored NAME string) and checks SD.exists()
         // directly, never patchNames[]. A scanPatches() call was added
         // here anyway on the assumption it was needed, and it broke every
         // later patch load: the ESP32 SD library does not always reset a
         // directory handle's internal state cleanly on a second open of
         // the same path, so this boot-time scan silently emptied the list
-        // the NEXT scanPatches() — the one that runs when Load is opened —
+        // the NEXT scanPatches() â€” the one that runs when Load is opened â€”
         // was supposed to populate. Removed (v0.9952). patchNames[] is
         // still scanned exactly when it always was: on entering the
         // Load/Save browser.
@@ -15462,7 +15487,7 @@ void setup(){
     // Probing means reconfiguring an I2C peripheral, and one of the two is
     // M5's, carrying the keyboard and the IMU. Doing that unasked on every
     // startup meant a board with no sensor attached still had its bus
-    // disturbed — reported as parameters drifting, the waveform changing
+    // disturbed â€” reported as parameters drifting, the waveform changing
     // and notes sounding with nothing present. Nothing that touches shared
     // hardware should happen unless the player asked for it.
     //
@@ -15475,26 +15500,27 @@ void setup(){
 
     // lastModMorph/lastModShape only get updated during active note playback
     // (see audioTask), so without this they'd sit at their compile-time
-    // defaults — showing a default Sine waveform on the MAIN screen —
+    // defaults â€” showing a default Sine waveform on the MAIN screen â€”
     // until the first note was played after boot/load.
     lastModMorph=params.timbreMorph;
     lastModShape=constrain(params.oscShape+params.oscShapeOffset,0.f,1.f);
 
-    bool imuOk=M5.Imu.begin();
+    bool imuOk=!M5.isCardenza() && M5.Imu.begin();
     Serial.println(imuOk?"[IMU] OK":"[IMU] not found");
 
     auto sc=M5Cardputer.Speaker.config();
-    sc.sample_rate=SAMPLE_RATE;sc.dma_buf_count=8; // was 4 — more queued headroom so
+    sc.sample_rate=SAMPLE_RATE;sc.dma_buf_count=8; // was 4 â€” more queued headroom so
     // occasional delays in the Speaker's own I2S-feed task (pinned to the
     // same core as the display's SPI-DMA activity, see below) don't force
     // audioTask's playRaw() call to wait as long for a free buffer slot,
     // which showed up as "over budget" buffers correlated with screen
-    // redraws (e.g. a key press) — an audible click. Costs a bit more
+    // redraws (e.g. a key press) â€” an audible click. Costs a bit more
     // fixed audio latency in exchange for resilience; worth revisiting if
     // the latency becomes noticeable.
     sc.dma_buf_len=512;sc.task_pinned_core=APP_CPU_NUM;
     M5Cardputer.Speaker.config(sc);
-    M5Cardputer.Speaker.begin();
+
+    cardenza_m5_require(M5Cardputer.Speaker.begin(),"Speaker init FAILED");
     M5Cardputer.Speaker.setVolume(255);
 
     // Audio synthesis runs on Core 0 (PRO_CPU). Core 1 (APP_CPU) is left for
@@ -15502,9 +15528,10 @@ void setup(){
     // (task_pinned_core above). Both cores were previously shared between
     // loop() and this task, which could starve the watchdog under heavy
     // load (e.g. LFO active + rapid retriggering) and freeze the device.
-    xTaskCreatePinnedToCore(audioTask,"audioTask",4096,nullptr,5,nullptr,PRO_CPU_NUM);
 
-    // The one real application of the saved brightness (v0.99986) — see
+    cardenza_m5_require(xTaskCreatePinnedToCore(audioTask,"audioTask",4096,nullptr,5,nullptr,PRO_CPU_NUM) == pdPASS,"Audio task init FAILED");
+
+    // The one real application of the saved brightness (v0.99986) â€” see
     // the deferral comment on applyUiBrightness()/bootBrightnessDeferred
     // above. Everything up to this point (the splash's own fade, canvas
     // creation, wavetables, the SD mount and settings load, the speaker
@@ -15525,26 +15552,26 @@ int  lastScalePickerLevel=0;
 bool lastHelpVisible=false;
 
 // Deferred Row-1 retrigger state (v0.99955), checked every loop() pass
-// with no delay() anywhere — see the note above where this is set, in
+// with no delay() anywhere â€” see the note above where this is set, in
 // the keyChanged block, for what this replaced and why.
 bool  pendingRow1Retrigger=false;
 unsigned long pendingRow1SetMs=0;
 float pendingRow1Nf=0.f;
 bool  pendingRow1MidiActive=false;
 
-// Volume, step 5%->1%, hold-to-repeat (v0.9996x) — same request as ARP/
+// Volume, step 5%->1%, hold-to-repeat (v0.9996x) â€” same request as ARP/
 // SEQ/SONG's Tempo/Swing, applied here too since keyVolume is read from
 // the SAME two keys ('l'/'k') regardless of appMode: one fix covers
 // PLAY, SEQ, and SONG together rather than needing three separate ones.
 // Runs unconditionally every loop() pass, not gated by keyChanged, for
-// the same reason updateSeqEditing()/updateSongEditor() do — a function
+// the same reason updateSeqEditing()/updateSongEditor() do â€” a function
 // only invoked when the key SET changes never gets called again while a
 // key is simply held steady, so menuKeyFire()'s own timing logic would
 // never get polled again either. This used to live inside
 // updateOctaveAndVolume(), which is keyChanged-gated for everything else
 // it does and stayed that way; only volume needed pulling out.
 // Shift+L is "Load Song" in SONG mode, so plain 'l' has to be excluded
-// there — matching the same exclusion the old inline code already had.
+// there â€” matching the same exclusion the old inline code already had.
 void updateVolumeRepeat(){
     auto s=M5Cardputer.Keyboard.keysState();
     bool vU=false,vD=false;
@@ -15559,7 +15586,7 @@ void updateVolumeRepeat(){
     prevVolumeUpPressed=vU;prevVolumeDownPressed=vD;
 }
 
-// Keyboard-scan watchdog (v0.9997x) — a real, documented hardware quirk
+// Keyboard-scan watchdog (v0.9997x) â€” a real, documented hardware quirk
 // of the Cardputer ADV's TCA8418 I2C keypad controller: under certain I2C
 // bus conditions, most reliably triggered by fast key presses, the chip
 // can get stuck reporting stale data until its own RESET line is pulled,
@@ -15567,7 +15594,7 @@ void updateVolumeRepeat(){
 // This is not a C.P.S. bug; it is documented behaviour of the same chip
 // reported independently by engineers working with it directly. Without
 // a way to reset the chip itself, the best available recovery is a full
-// restart of the whole board — trading "stuck until the player notices
+// restart of the whole board â€” trading "stuck until the player notices
 // and manually resets" for "recovers on its own within the timeout".
 //
 // The condition deliberately requires the reported key state to be
@@ -15575,7 +15602,7 @@ void updateVolumeRepeat(){
 // that way for a long time is completely normal and must never trigger
 // this. What it cannot distinguish is a genuinely stuck TCA8418 from a
 // player deliberately holding one long, unchanging note or chord for the
-// same span of real time — those look identical from here. The long
+// same span of real time â€” those look identical from here. The long
 // threshold below is chosen specifically to make that collision rare,
 // not to make it impossible; see the README/manual note this is meant to
 // pair with.
@@ -15590,12 +15617,12 @@ void updateKeyboardWatchdog(){
     auto s=M5Cardputer.Keyboard.keysState();
     char wbuf[24]={0}; int wi=0;
     for(char c:s.word){if(wi<20)wbuf[wi++]=c;}
-    // Sorted before comparing (v0.9997x fix) — a report showed the
+    // Sorted before comparing (v0.9997x fix) â€” a report showed the
     // 30-second restart never firing despite arpHeldCount staying frozen
     // at the same value the whole time, which only makes sense if s.word
     // itself was being read as "changed" every single check. The
     // suspected cause: s.word's character ORDER is not guaranteed stable
-    // between reads even for the exact same held key set — if one check
+    // between reads even for the exact same held key set â€” if one check
     // reads "3i" and the next reads "i3", a raw strcmp sees those as
     // different and keeps resetting the timer, never accumulating enough
     // consecutive unchanged time to reach the threshold. Sorting first
@@ -15603,18 +15630,18 @@ void updateKeyboardWatchdog(){
     // order the library happened to report them in.
     for(int i=1;i<wi;i++){char key=wbuf[i];int j=i-1;while(j>=0&&wbuf[j]>key){wbuf[j+1]=wbuf[j];j--;}wbuf[j+1]=key;}
     // The per-change and every-5s confirmation logging that used to sit
-    // here (v0.9997x) is retired (UI/UX diagnostic pass) — it did its
+    // here (v0.9997x) is retired (UI/UX diagnostic pass) â€” it did its
     // job: confirmed the sort fix above actually works (a real recovery
     // was observed firing at 30017ms). Left running, it would print on
     // nearly every keypress and every 5s of any held note, which is too
     // noisy for ordinary use. Only the actual restart notice below stays
-    // — genuinely rare, and worth knowing happened.
+    // â€” genuinely rare, and worth knowing happened.
     if(strcmp(wbuf,lastKbWatchdogWord)!=0){
         strcpy(lastKbWatchdogWord,wbuf);
         lastKbWatchdogChangeMs=nowMs;
         return;
     }
-    if(wbuf[0]=='\0')return;   // nothing held — an unchanging empty state is normal, not stuck
+    if(wbuf[0]=='\0')return;   // nothing held â€” an unchanging empty state is normal, not stuck
     if(nowMs-lastKbWatchdogChangeMs>=KB_WATCHDOG_TIMEOUT_MS){
         Serial.printf("[watchdog] keyboard word \"%s\" unchanged for %lums - restarting\n",
             wbuf,nowMs-lastKbWatchdogChangeMs);
@@ -15625,7 +15652,7 @@ void updateKeyboardWatchdog(){
 
 void loop(){
     // Set at the very top of every pass, before anything that could hang
-    // (v0.9997x) — a hang partway through this exact iteration should
+    // (v0.9997x) â€” a hang partway through this exact iteration should
     // still leave the timestamp from the START of that iteration, proof
     // loop() reached here before whatever came next didn't finish.
     loopHeartbeatMs=millis();
@@ -15654,7 +15681,7 @@ void loop(){
     // loop() to do on their behalf.
     midiDiagTick();
     morphTick();
-    // Independent of audioTask entirely, deliberately — if audioTask has
+    // Independent of audioTask entirely, deliberately â€” if audioTask has
     // truly stopped (a deadlock), it can never set diagPrintPending
     // again, so piggybacking on that flag would never fire either. This
     // uses only loop()'s own clock against the heartbeat's last value
@@ -15674,7 +15701,7 @@ void loop(){
                     silentUs/1000);
             } else if(currentFreq>0.f&&envPhase==EnvPhase::IDLE){
                 // audioTask IS alive (heartbeat is current) but the
-                // envelope disagrees with what should be sounding — a
+                // envelope disagrees with what should be sounding â€” a
                 // different class of fault than a stuck task, and this
                 // distinguishes it on the next occurrence rather than
                 // requiring a guess between them (v0.99944).
@@ -15713,7 +15740,7 @@ void loop(){
             if(appMode==AppMode::SETTINGS||appMode==AppMode::SEQ)saveSettings();
             appMode=lastMainMode;
             currentFreq=0;
-            // PLAY and SEQ are distinct modes — switching between them should
+            // PLAY and SEQ are distinct modes â€” switching between them should
             // silence whatever was sounding rather than carrying it over.
             if(seqPlaying){seqPlaying=false;songPlaying=false;seqSliding=false;seqAccentCutoffBoostTarget=0.f;seqAccentResoBoostTarget=0.f;seqVelocityMult=1.0f;}
             arpHeldCount=0;
@@ -15745,7 +15772,7 @@ void loop(){
     // SEQ itself (which has its own dedicated note-entry key handling).
     // Every other screen (VCO/VCF/VCA/LFO/SETTINGS/CATEGORY, including
     // all of CATEGORY's own sub-screens/overlays) only uses ;/./,// for
-    // its own navigation, so there's no key conflict — and it means
+    // its own navigation, so there's no key conflict â€” and it means
     // tone/filter/LFO changes can be heard live while editing, not just
     // on PLAY.
     bool notesAllowed=(appMode!=AppMode::PATCH&&appMode!=AppMode::SEQ&&appMode!=AppMode::PATTERN&&appMode!=AppMode::SONG&&appMode!=AppMode::TIMBRE);
@@ -15755,25 +15782,25 @@ void loop(){
             // Sequencer has exclusive control of currentFreq while
             // playing (see updateSeqTiming(), called unconditionally
             // below so the pattern keeps looping even on other screens)
-            // — don't let normal note-triggering or Arp fight it.
+            // â€” don't let normal note-triggering or Arp fight it.
         } else if(notesAllowed&&arpEnabled){
             // Arp mode: track the held chord here; updateArpTiming() below
             // (which runs every loop iteration, not just on keyChanged)
             // drives currentFreq/envelope retriggering from it. Latch's
             // own edge-detection is a separate, genuinely keyChanged-only
-            // concern (v0.99931) — see updateArpLatchEdges().
+            // concern (v0.99931) â€” see updateArpLatchEdges().
             updateArpLatchEdges();
             rebuildArpChord();
         } else if(notesAllowed){
             float nf=resolveFreqFromKeys();
             // v0.99951's cross-event debounce is REVERTED here (v0.99952)
-            // — it broke every ordinary keypress. keyChanged is edge-
+            // â€” it broke every ordinary keypress. keyChanged is edge-
             // triggered: it fires once when the pressed-key SET changes,
             // not repeatedly while a key is simply held. Requiring a
             // SECOND keyChanged carrying the same nf therefore had no
-            // natural way to ever arrive for a normal single press — there
+            // natural way to ever arrive for a normal single press â€” there
             // is no further state change to report while a finger just
-            // sits on one key — so nfConfirmedForRetrigger was false for
+            // sits on one key â€” so nfConfirmedForRetrigger was false for
             // essentially every real note, not just the Shift+digit
             // glitch it was meant to catch. Silent from boot onward was
             // the result. The real fix is below, scoped to the one
@@ -15781,7 +15808,7 @@ void loop(){
             // Don't let the built-in keyboard clear a note that MIDI is
             // holding (v0.9983). resolveFreqFromKeys() returns 0 when no
             // local key is down, and this used to assign that
-            // unconditionally — so any keyChanged event killed a MIDI note
+            // unconditionally â€” so any keyChanged event killed a MIDI note
             // instantly. keyChanged fires for octave, volume, Tab and
             // every other key too, which is why the symptom was notes
             // cutting off or not sounding at all, seemingly at random,
@@ -15810,16 +15837,16 @@ void loop(){
                 // yields to the scheduler, and doing that synchronously
                 // inside loop()'s keyChanged handling opened a scheduling
                 // window that let some other, previously-latent race
-                // actually fire — the crash log showed several of these
+                // actually fire â€” the crash log showed several of these
                 // retriggers firing in quick succession right before a
                 // Guru Meditation StoreProhibited fault. No delay() call
                 // is used anywhere in this replacement.
                 //
                 // Instead, a Row-1 retrigger is deferred rather than
                 // decided immediately: the note info is stashed, and a
-                // SEPARATE check — outside this keyChanged-gated block,
+                // SEPARATE check â€” outside this keyChanged-gated block,
                 // reached on every ordinary loop() pass regardless of
-                // further key events — finalises it once ~5ms have
+                // further key events â€” finalises it once ~5ms have
                 // genuinely elapsed, with a fresh, non-blocking keysState()
                 // read at that point. loop() runs continuously many times
                 // per millisecond on its own, so this needs no explicit
@@ -15827,7 +15854,7 @@ void loop(){
                 bool viaRow1=false;
                 {
                     // A plain keysState() read, unlike delay(), does not
-                    // yield to the scheduler — only the delay() call this
+                    // yield to the scheduler â€” only the delay() call this
                     // replaced did that.
                     auto sChk=M5Cardputer.Keyboard.keysState();
                     for(char c:sChk.word)
@@ -15849,7 +15876,7 @@ void loop(){
             }
         } else if(appMode==AppMode::SEQ){
             // Handled by updateSeqEditing() above (note preview + auto-
-            // advance) — don't reset currentFreq here, or the preview
+            // advance) â€” don't reset currentFreq here, or the preview
             // note gets zeroed the instant it's set.
         } else {
             currentFreq=0;
@@ -15857,16 +15884,16 @@ void loop(){
     }
     // Self-healing safety net (v0.99958, narrowed v0.9997x): currentFreq
     // nonzero with envPhase stuck IDLE means SOMETHING set a pitch
-    // without the envelope ever following — originally found after rapid
+    // without the envelope ever following â€” originally found after rapid
     // Row-1 key presses (fast Morph-slot A/B testing), where the single-
     // slot pending mechanism below can have a NEWER press overwrite an
     // OLDER one's still-pending retrigger before its 5ms window
     // finalises, silently dropping it.
-    // Excluded while arpEnabled now — a real report of one note stuck
+    // Excluded while arpEnabled now â€” a real report of one note stuck
     // sounding continuously, ARP on, no Latch, traced back to this: ARP's
     // own triggerArpStep() sets currentFreq and envPhase=ATTACK together,
     // atomically, so there is no gap there, but a gate shorter than 100%
-    // deliberately leaves a silent gap BETWEEN steps — envPhase legitimately
+    // deliberately leaves a silent gap BETWEEN steps â€” envPhase legitimately
     // reaches IDLE via its own release while currentFreq still holds the
     // note that JUST finished, since nothing zeroes it for that gap on
     // purpose. This check does not know that gap is intentional, so it
@@ -15877,7 +15904,7 @@ void loop(){
     // this safety net was never meant to compete with it, only to catch
     // ordinary keyboard play's Row-1 pending-drop case, which does not
     // involve ARP at all.
-    // seqPlaying excluded too, same reasoning as arpEnabled — SEQ has its
+    // seqPlaying excluded too, same reasoning as arpEnabled â€” SEQ has its
     // own "exclusive control of currentFreq while playing" (see the note
     // near its own note-triggering code), including deliberate rest gaps
     // between steps, which this check has no way to distinguish from a
@@ -15887,7 +15914,7 @@ void loop(){
         envPhase=EnvPhase::ATTACK;
         filterEnvPhase=EnvPhase::ATTACK;
     }
-    // Finalises a deferred Row-1 retrigger (v0.99955) — runs on every
+    // Finalises a deferred Row-1 retrigger (v0.99955) â€” runs on every
     // ordinary loop() pass, unconditionally, not gated by keyChanged, so
     // it needs no explicit wait: loop() naturally runs many times within
     // 5ms on its own. No delay() call anywhere in this path.
@@ -15896,7 +15923,7 @@ void loop(){
         bool shiftNow=M5Cardputer.Keyboard.keysState().shift;
         if(!shiftNow&&pendingRow1Nf>0&&(currentFreq==0||pendingRow1MidiActive)){
             // The [retrigger] diagnostic that used to sit here (v0.99950)
-            // is retired (v0.9997x, UI/UX diagnostic pass) — it did its
+            // is retired (v0.9997x, UI/UX diagnostic pass) â€” it did its
             // job: found the Shift+digit keyboard scan race that caused
             // it, fixed since v0.99952. Row 1 is this instrument's main
             // octave, so this fired on nearly every note played; no
@@ -15910,15 +15937,15 @@ void loop(){
     }
     if(!seqPlaying&&notesAllowed&&arpEnabled)updateArpTiming();
     // The [arp] diagnostic that used to sit here (v0.9997x) is retired
-    // (UI/UX diagnostic pass) — it did its job: proved arpHeldCount and
+    // (UI/UX diagnostic pass) â€” it did its job: proved arpHeldCount and
     // the raw keyboard word both stayed frozen identically during a
     // freeze, which is what led to the actual cause (the TCA8418
     // keyboard chip, not this code) and the watchdog that now mitigates
     // it. No ongoing reason to print this every second ARP is on.
     if(seqPlaying)updateSeqTiming();
 
-    // Computed here (after all of this frame's mode-changing input —
-    // G0, Tab-cycle, SONG/PATCH/PATTERN's own Tab handling — has already
+    // Computed here (after all of this frame's mode-changing input â€”
+    // G0, Tab-cycle, SONG/PATCH/PATTERN's own Tab handling â€” has already
     // been processed above), not at the top of loop(), so a full redraw
     // triggered by a mode change this same frame already sees the RIGHT
     // color instead of yesterday's.
@@ -15935,7 +15962,7 @@ void loop(){
         if(st.tab)menuKey=true;
     }
 
-    // Minimum interval between forced (key-triggered) pushSprite() calls —
+    // Minimum interval between forced (key-triggered) pushSprite() calls â€”
     // rapid key repeats/menu navigation could otherwise trigger a full
     // 240x135 canvas push on nearly every loop() iteration, which showed
     // up as an audible "crackle" (occasional audioTask buffers running
@@ -15946,24 +15973,24 @@ void loop(){
     bool canForceRedraw=modeChanged||(nowMs0-lastDisplayMs)>=MIN_REDRAW_MS;
 
     // delay(5) removed from the end of every branch below (v0.99957).
-    // It was a longstanding, pre-existing pattern — present on every
-    // non-PLAY screen — not something added this session, which is why
+    // It was a longstanding, pre-existing pattern â€” present on every
+    // non-PLAY screen â€” not something added this session, which is why
     // it took this long to implicate: two crashes (Guru Meditation,
     // StoreProhibited, EXCVADDR=0x4) both happened on the very first
     // transition away from PLAY, on a completely fresh boot, reproduced
-    // via both Tab (into VCO) and G0 (into SEQ) — the one thing every
+    // via both Tab (into VCO) and G0 (into SEQ) â€” the one thing every
     // one of these branches has in common is this delay(5) at the end.
     // delay() yields to the FreeRTOS scheduler; something added earlier
     // this session (most plausibly the morphChain/filterParams locking
     // work) most likely introduced a race that only manifests when a
     // scheduler yield happens to land in the wrong window, and this
     // delay was simply the first place reliable enough to hit it. The
-    // underlying race itself is not yet found — this removes the yield
+    // underlying race itself is not yet found â€” this removes the yield
     // point these branches share rather than the race, the same
     // mitigation that worked for the earlier Row-1 retrigger crash.
     // The actual per-screen redraw throttling (MIN_REDRAW_MS,
     // canForceRedraw, the 100ms checks) is untouched and still limits
-    // how often the canvas itself gets redrawn — only the artificial
+    // how often the canvas itself gets redrawn â€” only the artificial
     // pause on every loop() iteration is gone.
     if(appMode==AppMode::VCO){
         unsigned long now=millis();
@@ -16020,7 +16047,7 @@ void loop(){
         lastThemePickerOpen=themePickerOpen;
         // uiThemeDirty joins the full-redraw condition here too (v0.9938).
         // Applying a theme happens on this screen, and the tab bar is only
-        // painted on a full redraw — so previously the accent changed
+        // painted on a full redraw â€” so previously the accent changed
         // everywhere except the tab bar, which kept the old colour until
         // something else forced a repaint.
         bool full=modeChanged||pickerChanged||calChanged||resetChanged||scaleChanged||themeChanged||morphScrChanged||uiThemeDirty;
@@ -16062,14 +16089,14 @@ void loop(){
     bool helpChanged=(helpVisible!=lastHelpVisible);
     lastHelpVisible=helpVisible;
     // The overlay covers the whole screen, but PLAY and SEQ redraw through
-    // several partial sprites — so closing it MUST be followed by a full
+    // several partial sprites â€” so closing it MUST be followed by a full
     // redraw or leftover overlay pixels stay wherever no dirty region
     // happens to cover.
     //
     // That request used to be computed fresh each frame and consumed in
     // the same frame. If the redraw was throttled that frame
     // (canForceRedraw false, MIN_REDRAW_MS not yet elapsed) it was simply
-    // dropped — and lastHelpVisible had already been updated, so the next
+    // dropped â€” and lastHelpVisible had already been updated, so the next
     // frame no longer knew a full redraw was owed. The 100ms fallback then
     // redrew only the dirty regions, leaving help text sitting in the
     // waveform area or the nav line blanked. This is exactly why the
@@ -16085,7 +16112,7 @@ void loop(){
     // between them without a full clear leaves the previous mode's colour
     // in any area the new mode's dirty regions do not touch. modeChanged
     // is only true for a single frame, so if that frame's redraw is
-    // throttled the guarantee is lost — latch it here too (v0.9922).
+    // throttled the guarantee is lost â€” latch it here too (v0.9922).
     if(modeChanged)pendingFullRedraw=true;
     // A theme change repaints everything for the same reason (v0.9936).
     if(uiThemeDirty){pendingFullRedraw=true;uiThemeDirty=false;}
@@ -16113,7 +16140,7 @@ void loop(){
         if(fullNow)pendingFullRedraw=false;
     }
     // Removed for the same reason as every other branch above (v0.99957)
-    // — PLAY has not shown this crash yet, but that is not the same as
+    // â€” PLAY has not shown this crash yet, but that is not the same as
     // being provably safe from the same underlying race; consistency
     // with the rest of loop() costs nothing here.
 }
